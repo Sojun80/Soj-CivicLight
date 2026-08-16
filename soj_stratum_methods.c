@@ -166,8 +166,8 @@ static bool stratum_set_difficulty(struct stratum_ctx *sctx, json_t *params)
             if (sctx->next_diff != user_diff)
             {
 #ifndef RELEASE_HARDENED
-                applog(LOG_BLUE,
-                       "Stratum set difficulty: %.2f (pool) -> overridden to %.2f (user -p d=%.0f)",
+                applog(LOG_GREEN,
+                       "Stratum set difficulty: %.8f (pool) -> overridden to %.8f (user -p d=%.8f)",
                        diff,
                        user_diff,
                        user_diff);
@@ -180,7 +180,7 @@ static bool stratum_set_difficulty(struct stratum_ctx *sctx, json_t *params)
             if (sctx->next_diff != diff)
             {
 #ifndef RELEASE_HARDENED
-                applog(LOG_BLUE, "Stratum set difficulty: %.2f", diff);
+                applog(LOG_GREEN, "Stratum set difficulty: %.8f", diff);
 #endif
             }
             sctx->next_diff = diff;
@@ -191,7 +191,7 @@ static bool stratum_set_difficulty(struct stratum_ctx *sctx, json_t *params)
         if (sctx->next_diff != diff)
         {
 #ifndef RELEASE_HARDENED
-            applog(LOG_BLUE, "Stratum set difficulty: %.2f", diff);
+            applog(LOG_GREEN, "Stratum set difficulty: %.8f", diff);
 #endif
         }
         sctx->next_diff = diff;
