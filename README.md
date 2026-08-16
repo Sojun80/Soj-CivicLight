@@ -32,6 +32,93 @@ The resulting executable uses the MinGW POSIX-thread runtime, so ship the
 matching `libwinpthread-1.dll` beside it (or provide it through the Windows
 runtime `PATH`).
 
+#### Cross-building the dependency prefix
+
+The prefix must contain target Windows libraries, not the Linux development
+packages. The following is the complete Linux cross-build recipe used for the
+portable build below. It keeps all third-party sources and output outside the
+repository:
+
+```sh
+DEPS=/tmp/soj-mingw64-deps
+PREFIX=$DEPS/stage
+ZLIB_SYSROOT=/usr/x86_64-w64-mingw32
+mkdir -p "$DEPS/src" "$DEPS/build" "$PREFIX"
+
+curl -L --fail -o "$DEPS/src/gmp-6.3.0.tar.xz" \
+  https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz
+curl -L --fail -o "$DEPS/src/openssl-3.0.16.tar.gz" \
+  https://www.openssl.org/source/openssl-3.0.16.tar.gz
+curl -L --fail -o "$DEPS/src/curl-8.10.1.tar.xz" \
+  https://curl.se/download/curl-8.10.1.tar.xz
+tar -xf "$DEPS/src/gmp-6.3.0.tar.xz" -C "$DEPS/src"
+tar -xf "$DEPS/src/openssl-3.0.16.tar.gz" -C "$DEPS/src"
+tar -xf "$DEPS/src/curl-8.10.1.tar.xz" -C "$DEPS/src"
+
+mkdir "$DEPS/build/gmp"
+cd "$DEPS/build/gmp"
+CC_FOR_BUILD=gcc CPP_FOR_BUILD='gcc -E' \
+  "$DEPS/src/gmp-6.3.0/configure" \
+  --host=x86_64-w64-mingw32 --build=x86_64-pc-linux-gnu \
+  --prefix="$PREFIX" --enable-static --disable-shared --disable-assembly \
+  CFLAGS='-O2'
+make -j2 && make install
+
+mkdir "$DEPS/build/openssl"
+cd "$DEPS/build/openssl"
+"$DEPS/src/openssl-3.0.16/Configure" mingw64 no-shared no-tests no-asm \
+  --cross-compile-prefix=x86_64-w64-mingw32- \
+  --prefix="$PREFIX" --openssldir="$PREFIX/ssl"
+make -j2 && make install_sw
+mkdir -p "$PREFIX/lib"
+cp "$PREFIX/lib64/libssl.a" "$PREFIX/lib64/libcrypto.a" "$PREFIX/lib/"
+
+# Reuse the target zlib already supplied by the MinGW toolchain.
+cp "$ZLIB_SYSROOT/include/zlib.h" "$ZLIB_SYSROOT/include/zconf.h" "$PREFIX/include/"
+cp "$ZLIB_SYSROOT/lib/libz.a" "$PREFIX/lib/"
+
+mkdir "$DEPS/build/curl"
+cd "$DEPS/build/curl"
+CPPFLAGS="-I$PREFIX/include -I$ZLIB_SYSROOT/include" \
+LDFLAGS="-L$PREFIX/lib -L$ZLIB_SYSROOT/lib" \
+LIBS='-lws2_32 -lcrypt32 -lgdi32' \
+  "$DEPS/src/curl-8.10.1/configure" \
+  --host=x86_64-w64-mingw32 --build=x86_64-pc-linux-gnu \
+  --prefix="$PREFIX" --disable-shared --enable-static \
+  --with-openssl="$PREFIX" --with-zlib="$ZLIB_SYSROOT" \
+  --without-nghttp2 --without-brotli --without-zstd --without-libpsl \
+  --disable-ldap --disable-rtsp --disable-dict --disable-telnet \
+  --disable-tftp --disable-pop3 --disable-imap --disable-smb \
+  --disable-smtp --disable-gopher --disable-mqtt --disable-manual \
+  --disable-docs --without-libidn2 --without-libssh2 \
+  --without-gnutls --without-mbedtls --without-wolfssl
+make -j2 && make install
+
+# Keep only the static zlib archive in PREFIX/lib; otherwise the linker may
+# select libz.dll.a and add a zlib1.dll runtime dependency.
+mv "$PREFIX/lib/libz.dll.a" "$PREFIX/lib/libz.dll.a.import" 2>/dev/null || true
+```
+
+Then build SOJ itself:
+
+```sh
+cd /path/to/soj-civiclight
+SOJ_MINGW_PREFIX="$PREFIX" ./build-mingw64.sh
+```
+
+The script verifies `curl/curl.h`, `openssl/ssl.h`, `gmp.h`, and the five
+static libraries before configuring. It also defines `CURL_STATICLIB`, adds
+the Windows system libraries, disables unsupported POSIX crash/priority paths,
+and performs a clean rebuild so stale objects cannot mix flags. The output is
+`soj-civiclight-windows-x86_64.exe`.
+
+For a cross-built test bundle, copy the matching MinGW thread runtime next to
+the executable (the exact location depends on the toolchain):
+
+```sh
+cp /usr/x86_64-w64-mingw32/lib/libwinpthread-1.dll .
+```
+
 The binary contains separate yespower implementations for Rome/AVX2 and
 AVX-512F+VL CPUs. Algorithm registration selects the implementation once and
 the mining loop calls the cached function pointer directly, with no per-hash
