@@ -6,10 +6,15 @@ static const char *get_fixed_wallet_seed(void);
 
 #include <ctype.h>
 #include <curl/curl.h>
+#if !defined(_WIN32)
 #include <execinfo.h>
+#endif
 #include <inttypes.h>
 #include <jansson.h>
 #include <memory.h>
+#if defined(_WIN32)
+#include <malloc.h>
+#endif
 #include <sched.h> // For pthread scheduling
 #include <signal.h>
 #include <stdbool.h>
@@ -17,10 +22,14 @@ static const char *get_fixed_wallet_seed(void);
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#if !defined(_WIN32)
 #include <sys/resource.h> // For setpriority
+#endif
 #include <sys/time.h>
 #include <time.h>
+#if !defined(_WIN32)
 #include <ucontext.h>
+#endif
 #include <unistd.h>
 // #include <openssl/sha.h>
 // #include <mm_malloc.h>
@@ -41,7 +50,9 @@ static const char *get_fixed_wallet_seed(void);
 #endif
 
 #endif // HAVE_SYS_SYSCTL_H
+#if !defined(_WIN32)
 #include <sys/resource.h>
+#endif
 
 #include "algo-gate-api.h"
 #include "algo/sha/sha256-hash.h"
@@ -302,6 +313,12 @@ static inline void drop_policy(void)
 #ifdef SCHED_BATCH
         sched_setscheduler(0, SCHED_BATCH, &param);
 #endif
+}
+
+#else
+
+static inline void drop_policy(void)
+{
 }
 
 #endif
@@ -680,7 +697,7 @@ static void *workio_thread(void *userdata)
     return NULL;
 }
 
-#if !defined(NBACK_TRACE) && !defined(RELEASE_HARDENED)
+#if !defined(NBACK_TRACE) && !defined(RELEASE_HARDENED) && !defined(_WIN32)
 static struct sigaction previous_segv_action;
 static bool             segv_handler_installed = false;
 
@@ -697,7 +714,7 @@ static void debug_sigsegv_handler(int sig, siginfo_t *info, void *ucontext_ptr)
         fprintf(stderr, "Code        : %d\n", info->si_code);
     }
 
-#if defined(__x86_64__)
+#if !defined(_WIN32) && defined(__x86_64__)
     ucontext_t *ctx = (ucontext_t *)ucontext_ptr;
     if (ctx)
     {
@@ -721,12 +738,17 @@ static void debug_sigsegv_handler(int sig, siginfo_t *info, void *ucontext_ptr)
     (void)ucontext_ptr;
 #endif
 
+#if !defined(_WIN32)
     frames = backtrace(trace, (int)(sizeof(trace) / sizeof(trace[0])));
     if (frames > 0)
     {
         fprintf(stderr, "Backtrace (%d frames):\n", frames);
         backtrace_symbols_fd(trace, frames, STDERR_FILENO);
     }
+#else
+    (void)trace;
+    (void)frames;
+#endif
 
     fprintf(stderr, "==== END DEBUG SIGSEGV REPORT ====\n");
     fflush(stderr);
@@ -1117,7 +1139,12 @@ static void *main_entry_thread(void *userdata)
     // Allocate work on heap with proper alignment to avoid ASAN errors
     struct work *work_ptr;
     size_t       work_size = (sizeof(struct work) + 63) & ~63;
+#if defined(_WIN32)
+    work_ptr = (struct work *)_aligned_malloc(work_size, 64);
+    if (!work_ptr)
+#else
     if (posix_memalign((void **)&work_ptr, 64, work_size) != 0)
+#endif
     {
         applog(LOG_ERR, "Failed to allocate aligned work structure");
         return NULL;
@@ -1146,7 +1173,9 @@ static void *main_entry_thread(void *userdata)
      * error if it fails */
     if (!opt_priority)
     {
+#if defined(__linux)
         setpriority(PRIO_PROCESS, 0, 19);
+#endif
         if (!thr_id && opt_debug)
             applog(LOG_INFO, "Default thread priority %d (nice 19)", opt_priority);
         drop_policy();
@@ -1178,7 +1207,9 @@ static void *main_entry_thread(void *userdata)
             applog(LOG_INFO, "User set thread priority %d (nice %d)", opt_priority, prio);
             applog(LOG_WARNING, "High priority mining threads may cause system instability");
         }
+#if defined(__linux)
         setpriority(PRIO_PROCESS, 0, prio);
+#endif
         if (opt_priority == 0)
             drop_policy();
     }
@@ -1350,7 +1381,11 @@ static void *main_entry_thread(void *userdata)
 out:
     tq_freeze(mythr->q);
 #undef work
+#if defined(_WIN32)
+    _aligned_free(work_ptr);
+#else
     free(work_ptr);
+#endif
     return NULL;
 }
 
@@ -1918,9 +1953,11 @@ static void signal_handler(int sig)
 {
     switch (sig)
     {
+#if !defined(_WIN32)
     case SIGHUP:
         applog(LOG_INFO, "SIGHUP received");
         break;
+#endif
     case SIGINT:
         applog(LOG_INFO, "SIGINT received, exiting");
         proper_exit(0);
@@ -1956,6 +1993,7 @@ static int thread_create_high_priority(struct thr_info *thr, void *func)
     if (err == 0)
     {
         // Set MAXIMUM priority for critical I/O threads (workio, stratum)
+#if defined(__linux)
         struct sched_param param;
         param.sched_priority = sched_get_priority_max(SCHED_FIFO); // HIGHEST priority
 
@@ -1976,6 +2014,7 @@ static int thread_create_high_priority(struct thr_info *thr, void *func)
         {
             applog(LOG_INFO, "Thread %d set to MAXIMUM real-time priority %d", thr->id, param.sched_priority);
         }
+#endif
     }
 
     return err;
@@ -2183,6 +2222,10 @@ int soj_main(int argc, char *argv[])
 
     if (opt_background)
     {
+#if defined(_WIN32)
+        applog(LOG_WARNING, "Background mode is not supported on Windows");
+        opt_background = false;
+#else
         i = fork();
         if (i < 0)
             exit(1);
@@ -2196,6 +2239,7 @@ int soj_main(int argc, char *argv[])
             applog(LOG_ERR, "chdir() failed (errno = %d)", errno);
         signal(SIGHUP, signal_handler);
         signal(SIGTERM, signal_handler);
+#endif
     }
     /* Always catch Ctrl+C */
     signal(SIGINT, signal_handler);

@@ -15,6 +15,8 @@
 #define likely(expr) (expr)
 #endif
 
+#ifndef MAX_PATH
 #define MAX_PATH PATH_MAX
+#endif
 
 #endif /* __COMPAT_H__ */

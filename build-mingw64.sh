@@ -56,10 +56,11 @@ sed \
 
 export CC CXX WINDRES
 export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
-export CFLAGS="${CFLAGS:--O2 -mavx2 -msha}"
+export CFLAGS="${CFLAGS:--O2 -mavx2 -msha -DNBACK_TRACE}"
 export CXXFLAGS="${CXXFLAGS:-$CFLAGS}"
-export CPPFLAGS="${CPPFLAGS:--I$PREFIX/include}"
-export LDFLAGS="${LDFLAGS:--L$PREFIX/lib}"
+export CPPFLAGS="${CPPFLAGS:--I$PREFIX/include -DCURL_STATICLIB}"
+export LDFLAGS="${LDFLAGS:--static-libgcc -static-libstdc++ -L$PREFIX/lib}"
+export LIBS="${LIBS:--lws2_32 -lcrypt32 -lgdi32 -ladvapi32 -luser32}"
 
 ./autogen.sh
 ./configure \
@@ -67,6 +68,7 @@ export LDFLAGS="${LDFLAGS:--L$PREFIX/lib}"
     --build="${SOJ_BUILD_TRIPLE:-x86_64-pc-linux-gnu}" \
     --with-curl="$PREFIX" \
     --disable-assembly
+make clean >/dev/null 2>&1 || true
 make -j"${JOBS:-2}"
 
 output=${SOJ_WINDOWS_OUTPUT:-soj-civiclight-windows-x86_64.exe}

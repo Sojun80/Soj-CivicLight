@@ -71,7 +71,11 @@ static char           g_log_tag_letter = 'D';
 static void init_log_tag_letter(void)
 {
     unsigned int seed = (unsigned int)time(NULL) ^ (unsigned int)getpid();
+#if defined(_WIN32)
+    g_log_tag_letter  = (char)('A' + (rand() % 26u));
+#else
     g_log_tag_letter  = (char)('A' + (rand_r(&seed) % 26u));
+#endif
 }
 
 static inline char get_log_tag_letter(void)
@@ -157,7 +161,11 @@ void applog_nl(const char *fmt, ...)
     struct tm tm;
     char     *f   = (char *)malloc(len);
     time_t    now = time(NULL);
+#if defined(_WIN32)
+    localtime_s(&tm, &now);
+#else
     localtime_r(&now, &tm);
+#endif
 
     sprintf(f,
             "[%d-%02d-%02d %02d:%02d:%02d %c] %s",
@@ -345,7 +353,11 @@ void applog(int prio, const char *fmt, ...)
         time_t      now  = time(NULL);
         char       *bell = "";
 
+#if defined(_WIN32)
+        localtime_s(&tm, &now);
+#else
         localtime_r(&now, &tm);
+#endif
 
         switch (prio)
         {

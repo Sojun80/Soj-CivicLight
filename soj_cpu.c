@@ -93,6 +93,10 @@ static void cpuid(unsigned int leaf, unsigned int subleaf, unsigned int output[4
 void cpu_getname(char *outbuf, size_t maxsz)
 {
     memset(outbuf, 0, maxsz);
+#if defined(_WIN32)
+    snprintf(outbuf, maxsz, "Windows x86_64");
+    return;
+#else
     FILE  *fd   = fopen("/proc/cpuinfo", "rb");
     char  *buf  = NULL, *p, *eol;
     size_t size = 0;
@@ -119,11 +123,16 @@ void cpu_getname(char *outbuf, size_t maxsz)
 
     free(buf);
     fclose(fd);
+#endif
 }
 
 void cpu_getmodelid(char *outbuf, size_t maxsz)
 {
     memset(outbuf, 0, maxsz);
+#if defined(_WIN32)
+    snprintf(outbuf, maxsz, "windows:%d", num_cpus);
+    return;
+#else
 
     FILE  *fd     = fopen("/proc/cpuinfo", "rb");
     char  *buf    = NULL, *p;
@@ -163,6 +172,7 @@ void cpu_getmodelid(char *outbuf, size_t maxsz)
 
     free(buf);
     fclose(fd);
+#endif
 }
 
 bool cpu_arch_x86_64()

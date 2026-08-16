@@ -70,7 +70,11 @@
 // TODO for windows
 static inline bool is_root()
 {
+#if defined(_WIN32)
+    return false;
+#else
     return !getuid();
+#endif
 }
 
 #ifndef alloca

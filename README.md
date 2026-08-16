@@ -28,6 +28,9 @@ SOJ_MINGW_PREFIX=/mingw64 ./build-mingw64.sh
 The script checks the target headers and import/static libraries before
 configuring, then writes `soj-civiclight-windows-x86_64.exe`. Dependencies
 must be built for the same MinGW target; Linux libraries are not compatible.
+The resulting executable uses the MinGW POSIX-thread runtime, so ship the
+matching `libwinpthread-1.dll` beside it (or provide it through the Windows
+runtime `PATH`).
 
 The binary contains separate yespower implementations for Rome/AVX2 and
 AVX-512F+VL CPUs. Algorithm registration selects the implementation once and
