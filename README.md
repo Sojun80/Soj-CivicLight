@@ -12,8 +12,9 @@ The primary build uses the Clang-fast build script:
 ```
 
 It targets AMD Zen 2 or newer with AVX2 and SHA-NI, builds the `soj` miner, and
-runs a CivicLight v2 consensus-vector test before writing a timestamped local
-backup. The build and test path is offline.
+runs a CivicLight v2 consensus-vector test before writing focused `soj` and
+`soj-civiclight` binaries plus a timestamped local backup. The build and test
+path is offline.
 
 ### Windows (64-bit MinGW)
 
@@ -28,6 +29,8 @@ SOJ_MINGW_PREFIX=/mingw64 ./build-mingw64.sh
 The script checks the target headers and import/static libraries before
 configuring, then writes `soj-civiclight-windows-x86_64.exe`. Dependencies
 must be built for the same MinGW target; Linux libraries are not compatible.
+It also writes the focused alias `soj-civiclight.exe` alongside the
+platform-qualified output.
 The resulting executable uses the MinGW POSIX-thread runtime, so ship the
 matching `libwinpthread-1.dll` beside it (or provide it through the Windows
 runtime `PATH`).

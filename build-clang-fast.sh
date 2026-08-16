@@ -98,11 +98,11 @@ make -s -j$(nproc)
 # post-fork v2 hash vector before publishing a runnable binary.
 ./test-civiclight.sh
 
-# Keep the focused runtime binary name as soj. Keep one timestamped copy for
-# local A/B comparisons without filling the source tree with aliases.
+# Keep soj for compatibility while also emitting the focused project name.
 BUILD_TS=$(date +"%Y%m%d-%H%M%S")
 cp -f soj "soj-${BUILD_NUMBER}-${BUILD_TS}" 2>/dev/null || true
-chmod +x soj "soj-${BUILD_NUMBER}-${BUILD_TS}" 2>/dev/null || true
+cp -f soj soj-civiclight
+chmod +x soj soj-civiclight "soj-${BUILD_NUMBER}-${BUILD_TS}" 2>/dev/null || true
 
 # --------- KEEP ONLY LAST 5 BUILDS ---------
 # List builds, sort them, and remove all but the newest 5 (handles transition to timestamped names)
@@ -112,7 +112,7 @@ ls soj-[0-9]* 2>/dev/null | grep -E '^soj-[0-9]+(-[0-9]{8}-[0-9]{6})?$' | sort -
 rm -f preprocessed.c
 
 echo ""
-echo "Clang FAST CivicLight build #$BUILD_NUMBER complete: soj (backup: soj-${BUILD_NUMBER}-${BUILD_TS})"
+echo "Clang FAST CivicLight build #$BUILD_NUMBER complete: soj and soj-civiclight (backup: soj-${BUILD_NUMBER}-${BUILD_TS})"
 echo "   Version: ${BUILD_VERSION}"
 echo "   Commit:  ${GIT_HASH}"
 echo "   Built:   ${BUILD_DATE}"

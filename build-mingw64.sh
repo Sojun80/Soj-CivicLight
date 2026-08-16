@@ -73,4 +73,5 @@ make -j"${JOBS:-2}"
 
 output=${SOJ_WINDOWS_OUTPUT:-soj-civiclight-windows-x86_64.exe}
 cp -f soj.exe "$output"
-echo "Windows build complete: $ROOT_DIR/$output"
+cp -f soj.exe soj-civiclight.exe
+echo "Windows build complete: $ROOT_DIR/$output (alias: $ROOT_DIR/soj-civiclight.exe)"

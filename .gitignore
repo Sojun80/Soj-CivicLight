@@ -1,5 +1,6 @@
 minerd*
 soj
+soj-civiclight
 soj-[0-9]*
 build.log
 .build_number
