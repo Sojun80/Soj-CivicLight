@@ -8,6 +8,10 @@
 #ifndef HASHTABLE_H
 #define HASHTABLE_H
 
+#include <stddef.h>
+
+struct json_t;
+
 struct hashtable_list
 {
     struct hashtable_list *prev;
@@ -21,7 +25,7 @@ struct hashtable_pair
 {
     size_t                hash;
     struct hashtable_list list;
-    json_t               *value;
+    struct json_t        *value;
     size_t                serial;
     char                  key[1];
 };
@@ -78,7 +82,7 @@ void hashtable_close(hashtable_t *hashtable);
  *
  * Returns 0 on success, -1 on failure (out of memory).
  */
-int hashtable_set(hashtable_t *hashtable, const char *key, size_t serial, json_t *value);
+int hashtable_set(hashtable_t *hashtable, const char *key, size_t serial, struct json_t *value);
 
 /**
  * hashtable_get - Get a value associated with a key
@@ -175,6 +179,6 @@ void *hashtable_iter_value(void *iter);
  * @iter: The iterator
  * @value: The value to set
  */
-void hashtable_iter_set(void *iter, json_t *value);
+void hashtable_iter_set(void *iter, struct json_t *value);
 
 #endif

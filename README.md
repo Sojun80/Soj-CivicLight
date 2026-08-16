@@ -15,6 +15,20 @@ It targets AMD Zen 2 or newer with AVX2 and SHA-NI, builds the `soj` miner, and
 runs a CivicLight v2 consensus-vector test before writing a timestamped local
 backup. The build and test path is offline.
 
+### Windows (64-bit MinGW)
+
+Use `build-mingw64.sh` from a MinGW/MSYS2 shell, or from Linux with a
+cross-toolchain. Set `SOJ_MINGW_PREFIX` to the target dependency prefix; it
+must contain MinGW-built curl, OpenSSL, GMP, and zlib headers and libraries:
+
+```sh
+SOJ_MINGW_PREFIX=/mingw64 ./build-mingw64.sh
+```
+
+The script checks the target headers and import/static libraries before
+configuring, then writes `soj-civiclight-windows-x86_64.exe`. Dependencies
+must be built for the same MinGW target; Linux libraries are not compatible.
+
 The binary contains separate yespower implementations for Rome/AVX2 and
 AVX-512F+VL CPUs. Algorithm registration selects the implementation once and
 the mining loop calls the cached function pointer directly, with no per-hash

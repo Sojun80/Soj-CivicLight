@@ -8,6 +8,8 @@
 #ifndef STRBUFFER_H
 #define STRBUFFER_H
 
+#include <stddef.h>
+
 typedef struct
 {
     char  *value;
