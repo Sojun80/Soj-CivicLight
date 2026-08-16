@@ -1,0 +1,14 @@
+BasedOnStyle: LLVM
+IndentWidth: 4
+UseTab: Never
+ColumnLimit: 120          # wider wrap
+BreakBeforeBraces: Allman # put braces on their own line
+AllowShortBlocksOnASingleLine: Never
+AllowShortFunctionsOnASingleLine: None
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AlignConsecutiveAssignments: true
+AlignConsecutiveDeclarations: true
+BinPackArguments: false   # don't cram multiple args together on wrap
+BinPackParameters: false
+SortIncludes: Never       # preserve platform-sensitive include ordering

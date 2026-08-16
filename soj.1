@@ -1,0 +1,30 @@
+.TH SOJ 1 "August 2026" "soj-civiclight"
+.SH NAME
+soj \- SOJ CivicLight CPU miner
+.SH SYNOPSIS
+.B soj
+[options]
+.SH DESCRIPTION
+.B soj
+mines CivicLight v2 through a Stratum endpoint using the retained yespower implementation.
+.SH OPTIONS
+.TP
+.BI "-o, --url=" URL
+Stratum pool URL.
+.TP
+.BI "-u, --user=" USER
+Pool username or wallet.
+.TP
+.BI "-p, --pass=" PASSWORD
+Pool password and optional worker parameters.
+.TP
+.BI "-t, --threads=" N
+Number of mining threads.
+.TP
+.BI ""--benchmark=" SECONDS
+Run the offline CivicLight benchmark for the requested duration.
+.TP
+.BI ""--worker=" NAME
+Set the worker name.
+.SH FILES
+The source tree contains the CivicLight/yespower implementation, offline vector tests, and focused Salsa benchmark.
