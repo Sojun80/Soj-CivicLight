@@ -121,7 +121,7 @@ int main(int argc, char **argv)
     uint64_t totals2[4] = {0, 0, 0, 0};
     uint64_t totals4[4] = {0, 0, 0, 0};
     uint64_t totals1[4] = {0, 0, 0, 0};
-    uint64_t noxor = 0, pipe = 0, wide = 0, pwxreg = 0;
+    uint64_t noxor = 0, pipe = 0, wide = 0, pwxreg = 0, xpref = 0;
     const unsigned noxor_chunks = chunks;
 
     for (int m = 0; m < 4; ++m)
@@ -156,6 +156,12 @@ int main(int argc, char **argv)
             civic_yespower_smix2_bench_pwxreg(B[0], B[1], V[0], V[1], XY[0], XY[1], S[0], S[1], 0);
     clock_gettime(CLOCK_MONOTONIC_RAW, &ne);
     pwxreg = elapsed_ns(&ns, &ne);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ns);
+    for (unsigned chunk = 0; chunk < noxor_chunks; ++chunk)
+        for (unsigned i = 0; i < iterations; ++i)
+            civic_yespower_smix2_bench(B[0], B[1], V[0], V[1], XY[0], XY[1], S[0], S[1], 5);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ne);
+    xpref = elapsed_ns(&ns, &ne);
 
     for (unsigned chunk = 0; chunk < chunks; ++chunk)
         for (int m = 0; m < 4; ++m)
@@ -197,6 +203,9 @@ int main(int argc, char **argv)
     double pr = (double)pwxreg / ((uint64_t)noxor_chunks * iterations);
     printf("  pwx-reg (2w)  | %15.1f | %15s | %12.1f | %11s | %7s\n",
            pr, "-", pr / 2, "-", "-");
+    double px = (double)xpref / ((uint64_t)noxor_chunks * iterations);
+    printf("  xpref (2w)    | %15.1f | %15s | %12.1f | %11s | %7s\n",
+           px, "-", px / 2, "-", "-");
     printf("smix1 V-fill (N=2048 r=8), %llu calls/mode, 2-way = 2 hashes/call\n",
            (unsigned long long)calls);
     for (int m = 0; m < 4; ++m)

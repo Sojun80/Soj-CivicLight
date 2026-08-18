@@ -2266,6 +2266,21 @@ void civic_yespower_smix2_bench(uint8_t *B0,
             Vj0 = V[0];
             Vj1 = V[1];
         }
+        /* mode 5: cross-call prefetch.  The next V block's index is known as
+         * soon as the previous call returns; issue prefetches immediately so
+         * the first blocks of the next blockmix have a head start over the
+         * call-top prefetch loop (which only leads by ~100 cycles). */
+        if (mode == 5)
+        {
+            _mm_prefetch(&Vj0[0], _MM_HINT_T0);
+            _mm_prefetch(&Vj1[0], _MM_HINT_T0);
+            _mm_prefetch(&Vj0[1], _MM_HINT_T0);
+            _mm_prefetch(&Vj1[1], _MM_HINT_T0);
+            _mm_prefetch(&Vj0[2], _MM_HINT_T0);
+            _mm_prefetch(&Vj1[2], _MM_HINT_T0);
+            _mm_prefetch(&Vj0[3], _MM_HINT_T0);
+            _mm_prefetch(&Vj1[3], _MM_HINT_T0);
+        }
         if (mode == 2)
             civic_blockmix_xor_2way(X[0], Vj0, X[0], &ctx[0], X[1], Vj1, X[1], &ctx[1], civic_r, result);
         else
@@ -2280,6 +2295,17 @@ void civic_yespower_smix2_bench(uint8_t *B0,
         }
         Vj0 = &V[0][j[0] * s];
         Vj1 = &V[1][j[1] * s];
+        if (mode == 5)
+        {
+            _mm_prefetch(&Vj0[0], _MM_HINT_T0);
+            _mm_prefetch(&Vj1[0], _MM_HINT_T0);
+            _mm_prefetch(&Vj0[1], _MM_HINT_T0);
+            _mm_prefetch(&Vj1[1], _MM_HINT_T0);
+            _mm_prefetch(&Vj0[2], _MM_HINT_T0);
+            _mm_prefetch(&Vj1[2], _MM_HINT_T0);
+            _mm_prefetch(&Vj0[3], _MM_HINT_T0);
+            _mm_prefetch(&Vj1[3], _MM_HINT_T0);
+        }
         if (mode == 2)
             civic_blockmix_xor_2way(X[0], Vj0, X[0], &ctx[0], X[1], Vj1, X[1], &ctx[1], civic_r, result);
         else
