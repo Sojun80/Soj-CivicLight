@@ -1,6 +1,15 @@
 #!/bin/sh
 set -e
 
+# With no explicit target, build the two supported comparison binaries. Keep
+# SOJ_MARCH=znverN available for a single-target build through the same script.
+if [ -z "${SOJ_MARCH:-}" ] && [ "${SOJ_BUILD_ALL:-0}" != "1" ]; then
+    echo "Building both Zen 2 and Zen 4 targets..."
+    SOJ_BUILD_ALL=1 SOJ_MARCH=znver2 "$0" "$@"
+    SOJ_BUILD_ALL=1 SOJ_MARCH=znver4 "$0" "$@"
+    exit 0
+fi
+
 # --------- SANITY: REMOVE BOM IF PRESENT ---------
 sed -i '1s/^\xEF\xBB\xBF//' "$0" 2>/dev/null || true
 
@@ -65,8 +74,9 @@ if [ -n "${CLANG_INLINE_THRESHOLD:-}" ]; then
 fi
 
 # --------- CPU TARGET ---------
-# Default targets Zen 5 (Ryzen 9800X3D). Override per machine, e.g.
+# Default invocation builds Zen 2 and Zen 4. Override for one target, e.g.
 #   SOJ_MARCH=znver2 ./build-clang-fast.sh     # EPYC Rome / Zen 2
+#   SOJ_MARCH=znver4 ./build-clang-fast.sh     # Ryzen 7950X3D / Zen 4
 #   SOJ_MARCH=native  ./build-clang-fast.sh    # whatever box you're on
 # The march is baked into the output name (soj-civiclight-${SOJ_MARCH}) so
 # binaries for different CPUs can coexist in one checkout.
