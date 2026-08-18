@@ -2,7 +2,7 @@
 set -eu
 
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-share_url=${SOJ_SHARE_URL:-http://192.168.1.25:8088}
+share_url=${SOJ_SHARE_URL:-http://sojllm.local:8088}
 share_url=${share_url%/}
 
 if [ "$#" -gt 0 ]; then
