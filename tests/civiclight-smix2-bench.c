@@ -20,12 +20,16 @@ enum
 
 extern void civic_yespower_smix2_bench(uint8_t *, uint8_t *, void *, void *, void *, void *,
                                        void *, void *, int);
+extern void civic_yespower_smix2_bench_noxor(uint8_t *, uint8_t *, void *, void *,
+                                             void *, void *, void *, void *, int);
 extern void civic_yespower_smix2_bench_wide(uint8_t *, uint8_t *, void *, void *,
                                               void *, void *, void *, void *, int);
 extern void civic_yespower_smix2_bench_pipe(uint8_t *, uint8_t *, void *, void *,
+                                            void *, void *, void *, void *, int);
+extern void civic_yespower_smix2_bench_pwxreg(uint8_t *, uint8_t *, void *, void *,
                                               void *, void *, void *, void *, int);
-extern void civic_yespower_smix2_bench_noxor(uint8_t *, uint8_t *, void *, void *,
-                                              void *, void *, void *, void *, int);
+extern void civic_yespower_smix1_bench(uint8_t *, uint8_t *, void *, void *,
+                                       void *, void *, void *, void *, int);
 extern void civic_yespower_smix2_bench4(uint8_t *, uint8_t *, uint8_t *, uint8_t *,
                                         void *, void *, void *, void *,
                                         void *, void *, void *, void *,
@@ -113,9 +117,11 @@ int main(int argc, char **argv)
     }
 
     static const char *names[4] = {"random+save  ", "sequential    ", "random+nosave", "pwxform-only "};
+    static const char *names1[4] = {"smix1 full   ", "smix1 no-pwx  ", "smix1 no-vread", "smix1 pwx-only"};
     uint64_t totals2[4] = {0, 0, 0, 0};
     uint64_t totals4[4] = {0, 0, 0, 0};
-    uint64_t noxor = 0, pipe = 0, wide = 0;
+    uint64_t totals1[4] = {0, 0, 0, 0};
+    uint64_t noxor = 0, pipe = 0, wide = 0, pwxreg = 0;
     const unsigned noxor_chunks = chunks;
 
     for (int m = 0; m < 4; ++m)
@@ -144,12 +150,28 @@ int main(int argc, char **argv)
             civic_yespower_smix2_bench_wide(B[0], B[1], V[0], V[1], XY[0], XY[1], S[0], S[1], 0);
     clock_gettime(CLOCK_MONOTONIC_RAW, &ne);
     wide = elapsed_ns(&ns, &ne);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ns);
+    for (unsigned chunk = 0; chunk < noxor_chunks; ++chunk)
+        for (unsigned i = 0; i < iterations; ++i)
+            civic_yespower_smix2_bench_pwxreg(B[0], B[1], V[0], V[1], XY[0], XY[1], S[0], S[1], 0);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ne);
+    pwxreg = elapsed_ns(&ns, &ne);
 
     for (unsigned chunk = 0; chunk < chunks; ++chunk)
         for (int m = 0; m < 4; ++m)
         {
             totals2[m] += run_chunk2(m, iterations, B, V, XY, S);
             totals4[m] += run_chunk4(m, iterations, B, V, XY, S);
+        }
+
+    for (unsigned chunk = 0; chunk < chunks; ++chunk)
+        for (int m = 0; m < 4; ++m)
+        {
+            clock_gettime(CLOCK_MONOTONIC_RAW, &ns);
+            for (unsigned i = 0; i < iterations; ++i)
+                civic_yespower_smix1_bench(B[0], B[1], V[0], V[1], XY[0], XY[1], S[0], S[1], m);
+            clock_gettime(CLOCK_MONOTONIC_RAW, &ne);
+            totals1[m] += elapsed_ns(&ns, &ne);
         }
 
     uint64_t calls = (uint64_t)chunks * iterations;
@@ -172,6 +194,17 @@ int main(int argc, char **argv)
     double pw = (double)wide / ((uint64_t)noxor_chunks * iterations);
     printf("  256-bit XOR   | %15.1f | %15s | %12.1f | %11s | %7s\n",
            pw, "-", pw / 2, "-", "-");
+    double pr = (double)pwxreg / ((uint64_t)noxor_chunks * iterations);
+    printf("  pwx-reg (2w)  | %15.1f | %15s | %12.1f | %11s | %7s\n",
+           pr, "-", pr / 2, "-", "-");
+    printf("smix1 V-fill (N=2048 r=8), %llu calls/mode, 2-way = 2 hashes/call\n",
+           (unsigned long long)calls);
+    for (int m = 0; m < 4; ++m)
+    {
+        double p1 = (double)totals1[m] / calls;
+        printf("  %s | %15.1f | %15s | %12.1f | %11s | %7s\n",
+               names1[m], p1, "-", p1 / 2, "-", "-");
+    }
 
     for (unsigned lane = 0; lane < 4; ++lane)
     {
