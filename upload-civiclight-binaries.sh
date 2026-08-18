@@ -2,8 +2,9 @@
 set -eu
 
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-share_url=${SOJ_SHARE_URL:-http://sojllm.local:8088}
-share_url=${share_url%/}
+ssh_target=${SOJ_SSH_TARGET:-sojun@sojllm.local}
+remote_dir=${SOJ_SHARE_DIR:-/home/sojun/lan-share}
+remote_dir=${remote_dir%/}
 
 if [ "$#" -gt 0 ]; then
     binaries="$*"
@@ -18,10 +19,8 @@ for binary in $binaries; do
         exit 1
     fi
 
-    echo "Uploading $binary to $share_url/$binary"
-    curl --fail --show-error --retry 2 \
-        --upload-file "$path" \
-        "$share_url/$binary"
+    echo "Uploading $binary to $ssh_target:$remote_dir/$binary"
+    scp -p "$path" "$ssh_target:$remote_dir/$binary"
 done
 
 echo "Upload complete."
