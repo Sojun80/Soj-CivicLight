@@ -298,6 +298,34 @@ static char *opt_stealth_filename = NULL;
 
 static void workio_cmd_free(struct workio_cmd *wc);
 
+/* struct work contains 64-byte-aligned SIMD fields. Keep heap instances
+ * aligned as well; ordinary malloc/calloc only guarantee max_align_t. */
+static struct work *work_alloc_aligned(void)
+{
+    struct work *work_ptr = NULL;
+
+#if defined(_WIN32)
+    work_ptr = (struct work *)_aligned_malloc(sizeof(*work_ptr), WORK_ALIGNMENT);
+    if (!work_ptr)
+        return NULL;
+#else
+    if (posix_memalign((void **)&work_ptr, WORK_ALIGNMENT, sizeof(*work_ptr)) != 0)
+        return NULL;
+#endif
+
+    memset(work_ptr, 0, sizeof(*work_ptr));
+    return work_ptr;
+}
+
+static void work_release_aligned(struct work *work_ptr)
+{
+#if defined(_WIN32)
+    _aligned_free(work_ptr);
+#else
+    free(work_ptr);
+#endif
+}
+
 static int *thread_affinity_map;
 
 #ifdef __linux /* Linux specific policy and affinity management */
@@ -578,7 +606,7 @@ static void workio_cmd_free(struct workio_cmd *wc)
     {
     case WC_SUBMIT_WORK:
         work_free(wc->u.work);
-        free(wc->u.work);
+        work_release_aligned(wc->u.work);
         break;
     default: /* do nothing */
         break;
@@ -593,7 +621,7 @@ static bool workio_get_work(struct workio_cmd *wc, CURL *curl)
     struct work *work_heap;
     int          failures = 0;
 
-    work_heap = calloc(1, sizeof(struct work));
+    work_heap = work_alloc_aligned();
     if (!work_heap)
         return false;
 
@@ -603,7 +631,7 @@ static bool workio_get_work(struct workio_cmd *wc, CURL *curl)
         if (unlikely((opt_retries >= 0) && (++failures > opt_retries)))
         {
             applog(LOG_ERR, "json_rpc_call failed, terminating workio thread");
-            free(work_heap);
+            work_release_aligned(work_heap);
             return false;
         }
 
@@ -614,7 +642,7 @@ static bool workio_get_work(struct workio_cmd *wc, CURL *curl)
 
     /* send work to requesting thread */
     if (!tq_push(wc->thr->q, work_heap))
-        free(work_heap);
+        work_release_aligned(work_heap);
 
     return true;
 }
@@ -825,7 +853,7 @@ static bool get_work(struct thr_info *thr, struct work *work)
         return false;
     /* copy returned work into storage provided by caller */
     memcpy(work, work_heap, sizeof(*work));
-    free(work_heap);
+    work_release_aligned(work_heap);
     return true;
 }
 
@@ -837,7 +865,7 @@ bool submit_work(struct thr_info *thr, const struct work *work_in)
     wc = (struct workio_cmd *)calloc(1, sizeof(*wc));
     if (!wc)
         return false;
-    wc->u.work = (struct work *)malloc(sizeof(*work_in));
+    wc->u.work = work_alloc_aligned();
     if (!wc->u.work)
         goto err_out;
     wc->cmd = WC_SUBMIT_WORK;
