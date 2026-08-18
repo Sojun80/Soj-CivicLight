@@ -67,6 +67,19 @@ static void *alloc_region(civic_yespower_region_t *region, size_t size)
         base = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
     }
 
+#if defined(MADV_HUGEPAGE) && defined(__linux__)
+    /*
+     * The yespower V array is ~2MB and this allocator's HUGEPAGE_THRESHOLD
+     * (12MB) means per-lane regions never use MAP_HUGETLB.  On THP=madvise
+     * systems that leaves V backed by 4KB pages (~512 TLB entries per lane),
+     * which the random-access smix2 loop thrashes.  Ask THP to fold this
+     * region into a single 2MB page.  Ignore failures: it's a hint, and
+     * MAP_HUGETLB regions (flags still set) are already huge-page backed.
+     */
+    if (base != MAP_FAILED && !(flags & MAP_HUGETLB))
+        (void)madvise(base, base_size, MADV_HUGEPAGE);
+#endif
+
 #else
     base = (void *)mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
 #endif

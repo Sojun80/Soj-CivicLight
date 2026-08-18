@@ -11,7 +11,7 @@ build_and_run()
 {
     name=$1
     shift
-    "${CC:-clang}" -O3 -g -march=znver2 -msha "$@" \
+    "${CC:-clang}" -O3 -g -march="${SOJ_MARCH:-znver5}" -msha "$@" \
         -DCIVIC_YESPOWER_SALSA_BENCH -I. \
         tests/civiclight-salsa-bench.c \
         algo/civiclight/yespower/yespower-opt.c \

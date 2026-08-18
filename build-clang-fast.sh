@@ -64,8 +64,17 @@ if [ -n "${CLANG_INLINE_THRESHOLD:-}" ]; then
     INLINE_FLAGS="-mllvm -inline-threshold=${CLANG_INLINE_THRESHOLD} -Qunused-arguments"
 fi
 
+# --------- CPU TARGET ---------
+# Default targets Zen 5 (Ryzen 9800X3D). Override per machine, e.g.
+#   SOJ_MARCH=znver2 ./build-clang-fast.sh     # EPYC Rome / Zen 2
+#   SOJ_MARCH=native  ./build-clang-fast.sh    # whatever box you're on
+# The march is baked into the output name (soj-civiclight-${SOJ_MARCH}) so
+# binaries for different CPUs can coexist in one checkout.
+SOJ_MARCH="${SOJ_MARCH:-znver5}"
+SOJ_MTUNE="${SOJ_MTUNE:-${SOJ_MARCH}}"
+
 # --------- CLANG FLAGS (AGGRESSIVE BUT REASONABLE) ---------
-export CFLAGS="-O3 -g -march=znver2 -mtune=znver2 \
+export CFLAGS="-O3 -g -march=${SOJ_MARCH} -mtune=${SOJ_MTUNE} \
 -mavx2 -mfma -mbmi2 -mlzcnt -mpopcnt -mprfchw -msha \
 -funroll-loops -fno-math-errno -ffast-math \
 -fno-strict-aliasing \
@@ -102,7 +111,8 @@ make -s -j$(nproc)
 BUILD_TS=$(date +"%Y%m%d-%H%M%S")
 cp -f soj "soj-${BUILD_NUMBER}-${BUILD_TS}" 2>/dev/null || true
 cp -f soj soj-civiclight
-chmod +x soj soj-civiclight "soj-${BUILD_NUMBER}-${BUILD_TS}" 2>/dev/null || true
+cp -f soj "soj-civiclight-${SOJ_MARCH}"
+chmod +x soj soj-civiclight "soj-civiclight-${SOJ_MARCH}" "soj-${BUILD_NUMBER}-${BUILD_TS}" 2>/dev/null || true
 
 # --------- KEEP ONLY LAST 5 BUILDS ---------
 # List builds, sort them, and remove all but the newest 5 (handles transition to timestamped names)
@@ -113,6 +123,7 @@ rm -f preprocessed.c
 
 echo ""
 echo "Clang FAST CivicLight build #$BUILD_NUMBER complete: soj and soj-civiclight (backup: soj-${BUILD_NUMBER}-${BUILD_TS})"
+echo "   Target: ${SOJ_MARCH} -> soj-civiclight-${SOJ_MARCH}"
 echo "   Version: ${BUILD_VERSION}"
 echo "   Commit:  ${GIT_HASH}"
 echo "   Built:   ${BUILD_DATE}"
