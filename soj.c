@@ -1243,7 +1243,18 @@ static void *main_entry_thread(void *userdata)
     }
 
     // CPU thread affinity
-    //  if (opt_affinity && num_cpus > 1) affine_to_cpu(mythr);
+#if defined(__linux)
+    if (opt_affinity && num_cpus > 1 && thread_affinity_map)
+    {
+        cpu_set_t cpuset;
+        CPU_ZERO(&cpuset);
+        CPU_SET(thread_affinity_map[thr_id], &cpuset);
+        if (sched_setaffinity(0, sizeof(cpuset), &cpuset) != 0)
+            applog(LOG_WARNING, "Failed to set CPU affinity for thread %d", thr_id);
+        else if (!thr_id && opt_debug)
+            applog(LOG_INFO, "Thread %d pinned to CPU %d", thr_id, thread_affinity_map[thr_id]);
+    }
+#endif
 
     // wait for stratum to send first job
     if (have_stratum)

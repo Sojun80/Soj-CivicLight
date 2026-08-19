@@ -13,6 +13,7 @@ struct option const options[] = {
     {"threads", 1, NULL, 't'},
     {"tps", 1, NULL, 1034},
     {"worker", 1, NULL, OPT_WORKER_KEY},
+    {"cpu-affinity", 1, NULL, 1020},
     {"timeout", 1, NULL, 'T'},
 #else
     {"algo", 1, NULL, 'a'},
@@ -25,6 +26,7 @@ struct option const options[] = {
     {"threads", 1, NULL, 't'},
     {"worker", 1, NULL, OPT_WORKER_KEY},
     {"benchmark", 1, NULL, OPT_BENCHMARK_CIVICLIGHT},
+    {"cpu-affinity", 1, NULL, 1020},
     {"time-limit", 1, NULL, 1008},
 #endif
     {0, 0, 0, 0}};
