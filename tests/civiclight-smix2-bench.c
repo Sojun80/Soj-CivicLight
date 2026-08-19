@@ -26,6 +26,8 @@ extern void civic_yespower_smix2_bench_wide(uint8_t *, uint8_t *, void *, void *
                                               void *, void *, void *, void *, int);
 extern void civic_yespower_smix2_bench_pipe(uint8_t *, uint8_t *, void *, void *,
                                             void *, void *, void *, void *, int);
+extern void civic_yespower_smix2_bench_pipewide(uint8_t *, uint8_t *, void *, void *,
+                                                void *, void *, void *, void *, int);
 extern void civic_yespower_smix2_bench_pwxreg(uint8_t *, uint8_t *, void *, void *,
                                               void *, void *, void *, void *, int);
 extern void civic_yespower_smix1_bench(uint8_t *, uint8_t *, void *, void *,
@@ -121,7 +123,7 @@ int main(int argc, char **argv)
     uint64_t totals2[4] = {0, 0, 0, 0};
     uint64_t totals4[4] = {0, 0, 0, 0};
     uint64_t totals1[4] = {0, 0, 0, 0};
-    uint64_t noxor = 0, pipe = 0, wide = 0, pwxreg = 0, xpref = 0;
+    uint64_t noxor = 0, pipe = 0, wide = 0, pwxreg = 0, xpref = 0, pipewide = 0;
     const unsigned noxor_chunks = chunks;
 
     for (int m = 0; m < 4; ++m)
@@ -150,6 +152,12 @@ int main(int argc, char **argv)
             civic_yespower_smix2_bench_wide(B[0], B[1], V[0], V[1], XY[0], XY[1], S[0], S[1], 0);
     clock_gettime(CLOCK_MONOTONIC_RAW, &ne);
     wide = elapsed_ns(&ns, &ne);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ns);
+    for (unsigned chunk = 0; chunk < noxor_chunks; ++chunk)
+        for (unsigned i = 0; i < iterations; ++i)
+            civic_yespower_smix2_bench_pipewide(B[0], B[1], V[0], V[1], XY[0], XY[1], S[0], S[1], 0);
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ne);
+    pipewide = elapsed_ns(&ns, &ne);
     clock_gettime(CLOCK_MONOTONIC_RAW, &ns);
     for (unsigned chunk = 0; chunk < noxor_chunks; ++chunk)
         for (unsigned i = 0; i < iterations; ++i)
@@ -200,6 +208,9 @@ int main(int argc, char **argv)
     double pw = (double)wide / ((uint64_t)noxor_chunks * iterations);
     printf("  256-bit XOR   | %15.1f | %15s | %12.1f | %11s | %7s\n",
            pw, "-", pw / 2, "-", "-");
+    double ppw = (double)pipewide / ((uint64_t)noxor_chunks * iterations);
+    printf("  pipe+wide     | %15.1f | %15s | %12.1f | %11s | %7s\n",
+           ppw, "-", ppw / 2, "-", "-");
     double pr = (double)pwxreg / ((uint64_t)noxor_chunks * iterations);
     printf("  pwx-reg (2w)  | %15.1f | %15s | %12.1f | %11s | %7s\n",
            pr, "-", pr / 2, "-", "-");

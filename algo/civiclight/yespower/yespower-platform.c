@@ -56,6 +56,12 @@ static void *alloc_region(civic_yespower_region_t *region, size_t size)
         new_size = size + hugepage_mask;
         new_size &= ~hugepage_mask;
     }
+    else if (size >= HUGEPAGE_SIZE)
+    {
+        /* Slack so the returned pointer can be 2MB-aligned (THP collapse
+         * requires 2MB-aligned windows; see the MADV_HUGEPAGE hint below). */
+        new_size = size + HUGEPAGE_SIZE;
+    }
     base = mmap(NULL, new_size, PROT_READ | PROT_WRITE, flags, -1, 0);
     if (base != MAP_FAILED)
     {
@@ -75,9 +81,21 @@ static void *alloc_region(civic_yespower_region_t *region, size_t size)
      * which the random-access smix2 loop thrashes.  Ask THP to fold this
      * region into a single 2MB page.  Ignore failures: it's a hint, and
      * MAP_HUGETLB regions (flags still set) are already huge-page backed.
+     *
+     * THP collapse only works on 2MB-aligned address windows, so for large
+     * regions we round the madvise range up to a 2MB boundary (the mmap
+     * above was sized with slack for this) and hint the aligned range.
      */
     if (base != MAP_FAILED && !(flags & MAP_HUGETLB))
-        (void)madvise(base, base_size, MADV_HUGEPAGE);
+    {
+        uint8_t *al = base;
+        if (size >= HUGEPAGE_SIZE)
+        {
+            uintptr_t a = (uintptr_t)base + HUGEPAGE_SIZE - 1;
+            al = (uint8_t *)(a & ~(uintptr_t)(HUGEPAGE_SIZE - 1));
+        }
+        (void)madvise(al, size, MADV_HUGEPAGE);
+    }
 #endif
 
 #else
@@ -86,6 +104,13 @@ static void *alloc_region(civic_yespower_region_t *region, size_t size)
     if (base == MAP_FAILED)
         base = NULL;
     aligned = base;
+    if (base && size >= HUGEPAGE_SIZE)
+    {
+        /* 2MB-align the returned region so the V array (placed at offset 0 by
+         * the callers) sits inside a 2MB-aligned window that THP can fold. */
+        uintptr_t a = (uintptr_t)base + HUGEPAGE_SIZE - 1;
+        aligned = (uint8_t *)(a & ~(uintptr_t)(HUGEPAGE_SIZE - 1));
+    }
 #elif defined(HAVE_POSIX_MEMALIGN)
     if ((errno = posix_memalign((void **)&base, 64, size)) != 0)
         base = NULL;

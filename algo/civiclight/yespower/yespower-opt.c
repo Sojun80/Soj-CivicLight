@@ -1863,6 +1863,79 @@ static void civic_blockmix_xor_save_2way_pipe(salsa20_blk_t *Bin1out0,
     result[1] = (uint32_t)Bin1out1[last].d[0];
 }
 
+/* Bench-only: software-pipelined variant with 256-bit loads/xors (halves the
+ * load/xor uop count of the Vj/Bin traffic).  Same semantics as the pipe
+ * variant; 32B-aligned (block-relative offsets 0/32). */
+static void civic_blockmix_xor_save_2way_pipewide(salsa20_blk_t *Bin1out0,
+                                                  salsa20_blk_t *Bin20,
+                                                  pwxform_ctx_t *ctx0,
+                                                  salsa20_blk_t *Bin1out1,
+                                                  salsa20_blk_t *Bin21,
+                                                  pwxform_ctx_t *ctx1,
+                                                  size_t r,
+                                                  uint32_t result[2])
+{
+    size_t last = r * 2 - 1;
+    civic_yp2_state_t a, b;
+    __m256i v0[2], v1[2], nv0[2], nv1[2];
+    __builtin_prefetch(&Bin20[last], 1, 3);
+    __builtin_prefetch(&Bin21[last], 1, 3);
+    for (size_t p = 0; p < last; ++p)
+    {
+        __builtin_prefetch(&Bin20[p], 1, 3);
+        __builtin_prefetch(&Bin21[p], 1, 3);
+    }
+    civic_yp2_read(&a, &Bin1out0[last]);
+    civic_yp2_xor(&a, &Bin20[last]);
+    civic_yp2_read(&b, &Bin1out1[last]);
+    civic_yp2_xor(&b, &Bin21[last]);
+    civic_yp2_ctx_load(&a, ctx0);
+    civic_yp2_ctx_load(&b, ctx1);
+    v0[0] = *(__m256i *)&Bin20[0].q[0];
+    v0[1] = *(__m256i *)&Bin20[0].q[2];
+    v1[0] = *(__m256i *)&Bin21[0].q[0];
+    v1[1] = *(__m256i *)&Bin21[0].q[2];
+
+    for (size_t i = 0; i <= last; ++i)
+    {
+        if (i != last)
+        {
+            nv0[0] = *(__m256i *)&Bin20[i + 1].q[0];
+            nv0[1] = *(__m256i *)&Bin20[i + 1].q[2];
+            nv1[0] = *(__m256i *)&Bin21[i + 1].q[0];
+            nv1[1] = *(__m256i *)&Bin21[i + 1].q[2];
+        }
+        __m256i ya0 = _mm256_xor_si256(v0[0], *(__m256i *)&Bin1out0[i].q[0]);
+        __m256i ya1 = _mm256_xor_si256(v0[1], *(__m256i *)&Bin1out0[i].q[2]);
+        __m256i yb0 = _mm256_xor_si256(v1[0], *(__m256i *)&Bin1out1[i].q[0]);
+        __m256i yb1 = _mm256_xor_si256(v1[1], *(__m256i *)&Bin1out1[i].q[2]);
+        *(__m256i *)&Bin20[i].q[0] = ya0;
+        *(__m256i *)&Bin20[i].q[2] = ya1;
+        *(__m256i *)&Bin21[i].q[0] = yb0;
+        *(__m256i *)&Bin21[i].q[2] = yb1;
+        *(__m256i *)&a.x[0] = _mm256_xor_si256(*(__m256i *)&a.x[0], ya0);
+        *(__m256i *)&a.x[2] = _mm256_xor_si256(*(__m256i *)&a.x[2], ya1);
+        *(__m256i *)&b.x[0] = _mm256_xor_si256(*(__m256i *)&b.x[0], yb0);
+        *(__m256i *)&b.x[2] = _mm256_xor_si256(*(__m256i *)&b.x[2], yb1);
+        civic_pwxform_2way(&a, &b);
+        if (i != last)
+        {
+            civic_yp2_write(&Bin1out0[i], &a);
+            civic_yp2_write(&Bin1out1[i], &b);
+        }
+        v0[0] = nv0[0];
+        v0[1] = nv0[1];
+        v1[0] = nv1[0];
+        v1[1] = nv1[1];
+    }
+    civic_yp2_ctx_store(ctx0, &a);
+    civic_yp2_ctx_store(ctx1, &b);
+    civic_yp2_finish_salsa(&a, &Bin1out0[last]);
+    civic_yp2_finish_salsa(&b, &Bin1out1[last]);
+    result[0] = (uint32_t)Bin1out0[last].d[0];
+    result[1] = (uint32_t)Bin1out1[last].d[0];
+}
+
 #ifdef CIVIC_YESPOWER_SMIX2_BENCH
 /*
  * Isolate the smix2 random-access loop (the dominant cost of each hash).
@@ -2451,6 +2524,76 @@ static void civic_blockmix_2way_reg(const salsa20_blk_t *Bin0,
     t.x[2] = xb[2];
     t.x[3] = xb[3];
     civic_yp2_finish_salsa(&t, &Bout1[last]);
+}
+
+void civic_yespower_smix2_bench_pipewide(uint8_t *B0,
+                                         uint8_t *B1,
+                                         void *V0,
+                                         void *V1,
+                                         void *XY0,
+                                         void *XY1,
+                                         void *S0,
+                                         void *S1,
+                                         int mode)
+{
+    enum { civic_N = 2048, civic_r = 8 };
+    const size_t s = 2 * civic_r;
+    const size_t Sbytes = Swidth_to_Sbytes1(Swidth_1_0);
+    salsa20_blk_t *V[2] = {(salsa20_blk_t *)V0, (salsa20_blk_t *)V1};
+    salsa20_blk_t *X[2] = {(salsa20_blk_t *)XY0, (salsa20_blk_t *)XY1};
+    salsa20_blk_t *Y[2] = {&X[0][s], &X[1][s]};
+    uint8_t *B[2] = {B0, B1};
+    uint8_t *S[2] = {(uint8_t *)S0, (uint8_t *)S1};
+    pwxform_ctx_t ctx[2];
+    uint32_t j[2], result[2];
+    uint32_t Nloop = (((civic_N + 2) / 3) + 1) & ~(uint32_t)1;
+    uint32_t seq = 0;
+
+    for (unsigned lane = 0; lane < 2; ++lane)
+    {
+        ctx[lane].S0 = S[lane];
+        ctx[lane].S1 = S[lane] + Sbytes;
+        ctx[lane].S2 = S[lane] + 2 * Sbytes;
+        ctx[lane].Sbytes = 3 * Sbytes;
+        ctx[lane].w = 0;
+        for (size_t i = 0; i < 2 * civic_r; ++i)
+        {
+            salsa20_blk_t *tmp = Y[lane];
+            salsa20_blk_t *dst = &X[lane][i];
+            const salsa20_blk_t *src = (salsa20_blk_t *)&B[lane][i * 64];
+            for (size_t k = 0; k < 16; ++k)
+                tmp->w[k] = le32dec(&src->w[k]);
+            salsa20_simd_shuffle(tmp, dst);
+        }
+    }
+    j[0] = integerify(X[0], civic_r) & (civic_N - 1);
+    j[1] = integerify(X[1], civic_r) & (civic_N - 1);
+
+    do
+    {
+        if (mode == 1)
+        {
+            j[0] = seq & (civic_N - 1);
+            j[1] = (seq * 2 + 1) & (civic_N - 1);
+            ++seq;
+        }
+        salsa20_blk_t *Vj0 = &V[0][j[0] * s];
+        salsa20_blk_t *Vj1 = &V[1][j[1] * s];
+        civic_blockmix_xor_save_2way_pipewide(X[0], Vj0, &ctx[0], X[1], Vj1, &ctx[1], civic_r, result);
+        j[0] = result[0] & (civic_N - 1);
+        j[1] = result[1] & (civic_N - 1);
+        if (mode == 1)
+        {
+            j[0] = seq & (civic_N - 1);
+            j[1] = (seq * 2 + 1) & (civic_N - 1);
+            ++seq;
+        }
+        Vj0 = &V[0][j[0] * s];
+        Vj1 = &V[1][j[1] * s];
+        civic_blockmix_xor_save_2way_pipewide(X[0], Vj0, &ctx[0], X[1], Vj1, &ctx[1], civic_r, result);
+        j[0] = result[0] & (civic_N - 1);
+        j[1] = result[1] & (civic_N - 1);
+    } while (Nloop -= 2);
 }
 
 void civic_yespower_smix2_bench_pwxreg(uint8_t *B0,
@@ -3532,9 +3675,9 @@ int civic_yespower(civic_yespower_local_t        *local,
         if (!alloc_region(local, need))
             goto fail;
     }
-    B      = (uint8_t *)local->aligned;
-    V      = (salsa20_blk_t *)((uint8_t *)B + B_size);
-    XY     = (salsa20_blk_t *)((uint8_t *)V + V_size);
+    V      = (salsa20_blk_t *)local->aligned;
+    B      = (uint8_t *)V + V_size;
+    XY     = (salsa20_blk_t *)(B + B_size);
     S      = (uint8_t *)XY + XY_size;
     ctx.S0 = S;
     ctx.S1 = S + Swidth_to_Sbytes1(Swidth);
@@ -3612,9 +3755,9 @@ static int civic_yespower2_fixed(civic_yespower_local_t *local0,
             if (free_region(locals[lane]) || !alloc_region(locals[lane], need))
                 goto fail2;
         }
-        B[lane] = (uint8_t *)locals[lane]->aligned;
-        V[lane] = (salsa20_blk_t *)(B[lane] + B_size);
-        XY[lane] = (salsa20_blk_t *)((uint8_t *)V[lane] + V_size);
+        V[lane] = (salsa20_blk_t *)locals[lane]->aligned;
+        B[lane] = (uint8_t *)V[lane] + V_size;
+        XY[lane] = (salsa20_blk_t *)(B[lane] + B_size);
         S[lane] = (uint8_t *)XY[lane] + XY_size;
         ctx[lane].S0 = S[lane];
         ctx[lane].S1 = S[lane] + S_part;
