@@ -60,6 +60,10 @@ compat/curl-for-windows/
 # Personal mining launchers stay local and are not published.
 mine-civiclight.sh
 mine-civiclight-7950x3d.sh
+mine-civiclight-4t.sh
+
+# Native build artifacts go out as releases, not commits.
+soj-civiclight-native
 
 # Auto-generated version file
 version.h
