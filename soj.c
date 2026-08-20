@@ -2292,6 +2292,46 @@ int soj_main(int argc, char *argv[])
     }
     if (opt_affinity)
     {
+#if defined(__linux)
+        /* Pin to CPUs the process is already allowed to use (numactl,
+         * cpuset, HiveOS) instead of always mapping thread N -> CPU N.
+         * Two -t 8 miners without a split used to stack on CPUs 0-7 and
+         * leave the second CCD idle. */
+        cpu_set_t allowed;
+        CPU_ZERO(&allowed);
+        if (sched_getaffinity(0, sizeof(allowed), &allowed) != 0)
+        {
+            for (int i = 0; i < num_cpus && i < CPU_SETSIZE; i++)
+                CPU_SET(i, &allowed);
+        }
+        if (opt_affinity != 0xFFFFFFFFFFFFFFFFULL)
+        {
+            for (int i = 0; i < CPU_SETSIZE; i++)
+            {
+                if (i >= 64 || !((opt_affinity >> i) & 1ULL))
+                    CPU_CLR(i, &allowed);
+            }
+        }
+        int allowed_list[CPU_SETSIZE];
+        int n_allowed = 0;
+        for (int i = 0; i < CPU_SETSIZE; i++)
+        {
+            if (CPU_ISSET(i, &allowed))
+                allowed_list[n_allowed++] = i;
+        }
+        if (!n_allowed)
+        {
+            applog(LOG_WARNING, "CPU affinity mask empty, not pinning threads");
+            opt_affinity = 0ULL;
+        }
+        else
+        {
+            for (int thr = 0; thr < map_size; thr++)
+                thread_affinity_map[thr] = allowed_list[thr % n_allowed];
+            if (opt_n_threads > n_allowed)
+                applog(LOG_WARNING, "More threads (%d) than allowed CPUs (%d)", opt_n_threads, n_allowed);
+        }
+#else
         int active_cpus = 0; // total CPUs available using rolling affinity mask
         for (int thr = 0, cpu = 0; thr < map_size; thr++, cpu++)
         {
@@ -2303,6 +2343,7 @@ int soj_main(int argc, char *argv[])
         }
         if (opt_n_threads > active_cpus)
             applog(LOG_WARNING, "More threads (%d) than active CPUs in affinity mask (%d)", opt_n_threads, active_cpus);
+#endif
     }
 
     // Unified SOJ System & Build Header
