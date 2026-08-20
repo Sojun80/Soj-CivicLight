@@ -25,7 +25,7 @@
 #include <linux/mman.h> /* for MAP_HUGE_2MB */
 #endif
 
-#define HUGEPAGE_THRESHOLD (12 * 1024 * 1024)
+#define HUGEPAGE_THRESHOLD (2 * 1024 * 1024)
 
 #ifdef __x86_64__
 #define HUGEPAGE_SIZE (2 * 1024 * 1024)
@@ -70,21 +70,18 @@ static void *alloc_region(civic_yespower_region_t *region, size_t size)
     else if (flags & MAP_HUGETLB)
     {
         flags &= ~(MAP_HUGETLB | MAP_HUGE_2MB);
-        base = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
+        new_size = size + HUGEPAGE_SIZE;
+        base = mmap(NULL, new_size, PROT_READ | PROT_WRITE, flags, -1, 0);
+        if (base != MAP_FAILED)
+            base_size = new_size;
     }
 
 #if defined(MADV_HUGEPAGE) && defined(__linux__)
     /*
-     * The yespower V array is ~2MB and this allocator's HUGEPAGE_THRESHOLD
-     * (12MB) means per-lane regions never use MAP_HUGETLB.  On THP=madvise
-     * systems that leaves V backed by 4KB pages (~512 TLB entries per lane),
-     * which the random-access smix2 loop thrashes.  Ask THP to fold this
-     * region into a single 2MB page.  Ignore failures: it's a hint, and
-     * MAP_HUGETLB regions (flags still set) are already huge-page backed.
-     *
-     * THP collapse only works on 2MB-aligned address windows, so for large
-     * regions we round the madvise range up to a 2MB boundary (the mmap
-     * above was sized with slack for this) and hint the aligned range.
+     * V is ~2MB.  MAP_HUGETLB is requested at 2MB so a reserved hugepage
+     * pool can back the random smix2 walk with one TLB entry.  If that
+     * mmap fails (no hugepages reserved) we fall back here and ask THP
+     * to collapse a 2MB-aligned window.  Ignore failures: it's a hint.
      */
     if (base != MAP_FAILED && !(flags & MAP_HUGETLB))
     {

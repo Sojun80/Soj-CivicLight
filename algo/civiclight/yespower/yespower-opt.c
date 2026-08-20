@@ -1203,6 +1203,69 @@ civic_pwxform_2way(civic_yp2_state_t *a, civic_yp2_state_t *b)
 #undef CIVIC_YP2_STEP_WRITE
 #undef CIVIC_YP2_STEP
 
+/* Interleaved pwxform: issue all 4 columns' S-table gathers for both lanes
+ * before the dependent ALU, so L2 load latency overlaps across 8 chains
+ * instead of 2.  Same write order and S rotation as civic_pwxform_2way. */
+CIVIC_INLINE_HOT void
+civic_pwxform_2way_ilv(civic_yp2_state_t *a, civic_yp2_state_t *b)
+{
+#define CIVIC_ILV_STEP(I, MEMBER)                                                                           \
+    do                                                                                                      \
+    {                                                                                                       \
+        uint64_t xa##I = EXTRACT64(a->x[I]) & Smask2_1_0;                                                   \
+        uint64_t xb##I = EXTRACT64(b->x[I]) & Smask2_1_0;                                                   \
+        __m128i adda##I = *(__m128i *)(a->S0 + (uint32_t)xa##I);                                            \
+        __m128i addb##I = *(__m128i *)(b->S0 + (uint32_t)xb##I);                                            \
+        __m128i xora##I = *(__m128i *)(a->S1 + (uint32_t)(xa##I >> 32));                                    \
+        __m128i xorb##I = *(__m128i *)(b->S1 + (uint32_t)(xb##I >> 32));                                    \
+        __m128i Ya##I = _mm_mul_epu32(_mm_srli_si128(a->x[I], 4), a->x[I]);                                 \
+        __m128i Yb##I = _mm_mul_epu32(_mm_srli_si128(b->x[I], 4), b->x[I]);                                 \
+        a->x[I] = _mm_xor_si128(_mm_add_epi64(Ya##I, adda##I), xora##I);                                    \
+        b->x[I] = _mm_xor_si128(_mm_add_epi64(Yb##I, addb##I), xorb##I);                                    \
+        *(__m128i *)(a->MEMBER + a->w) = a->x[I];                                                           \
+        *(__m128i *)(b->MEMBER + b->w) = b->x[I];                                                           \
+    } while (0)
+#define CIVIC_ILV_BUMP                                                                                      \
+    a->w += 16;                                                                                             \
+    b->w += 16;
+
+    CIVIC_ILV_STEP(0, S0);
+    CIVIC_ILV_STEP(1, S1);
+    CIVIC_ILV_BUMP;
+    CIVIC_ILV_STEP(2, S0);
+    CIVIC_ILV_STEP(3, S1);
+    CIVIC_ILV_BUMP;
+
+    CIVIC_ILV_STEP(0, S0);
+    CIVIC_ILV_STEP(1, S1);
+    CIVIC_ILV_BUMP;
+    civic_pwx_1_0_2way(&a->x[2], &b->x[2], a->S0, a->S1, b->S0, b->S1);
+    civic_pwx_1_0_2way(&a->x[3], &b->x[3], a->S0, a->S1, b->S0, b->S1);
+
+    CIVIC_ILV_STEP(0, S0);
+    CIVIC_ILV_STEP(1, S1);
+    CIVIC_ILV_BUMP;
+    civic_pwx_1_0_2way(&a->x[2], &b->x[2], a->S0, a->S1, b->S0, b->S1);
+    civic_pwx_1_0_2way(&a->x[3], &b->x[3], a->S0, a->S1, b->S0, b->S1);
+
+    a->w &= Smask2_1_0;
+    b->w &= Smask2_1_0;
+    uint8_t *tmp = a->S2;
+    a->S2 = a->S1;
+    a->S1 = a->S0;
+    a->S0 = tmp;
+    tmp = b->S2;
+    b->S2 = b->S1;
+    b->S1 = b->S0;
+    b->S0 = tmp;
+#undef CIVIC_ILV_BUMP
+#undef CIVIC_ILV_STEP
+}
+
+#ifdef __AVX2__
+#define civic_pwxform_2way civic_pwxform_2way_ilv
+#endif
+
 /* 4-way pwxform: all four lanes' independent chains interleaved per step so
  * the S-table load latency (L2) overlaps across 4 chains instead of 2.
  * The old 4-way path called civic_pwxform_2way(a,b) then (c,d) sequentially,
@@ -1826,6 +1889,40 @@ static void civic_blockmix_xor_save_2way_pipe(salsa20_blk_t *Bin1out0,
         v1[q] = Bin21[0].q[q];
     }
 
+    if (r == 8)
+    {
+#pragma GCC unroll 16
+        for (size_t i = 0; i <= last; ++i)
+        {
+            if (i != last)
+                for (unsigned q = 0; q < 4; ++q)
+                {
+                    nv0[q] = Bin20[i + 1].q[q];
+                    nv1[q] = Bin21[i + 1].q[q];
+                }
+            for (unsigned q = 0; q < 4; ++q)
+            {
+                __m128i ya = _mm_xor_si128(v0[q], Bin1out0[i].q[q]);
+                __m128i yb = _mm_xor_si128(v1[q], Bin1out1[i].q[q]);
+                Bin20[i].q[q] = ya;
+                Bin21[i].q[q] = yb;
+                a.x[q] = _mm_xor_si128(a.x[q], ya);
+                b.x[q] = _mm_xor_si128(b.x[q], yb);
+            }
+            civic_pwxform_2way(&a, &b);
+            if (i != last)
+            {
+                civic_yp2_write(&Bin1out0[i], &a);
+                civic_yp2_write(&Bin1out1[i], &b);
+            }
+            for (unsigned q = 0; q < 4; ++q)
+            {
+                v0[q] = nv0[q];
+                v1[q] = nv1[q];
+            }
+        }
+    }
+    else
     for (size_t i = 0; i <= last; ++i)
     {
         if (i != last)
@@ -3726,6 +3823,11 @@ fail:
     return -1;
 }
 
+#if 0 && defined(HUGEPAGE_SIZE)
+#define CIVIC_YP2_FUSED_V_ON 1
+#else
+#define CIVIC_YP2_FUSED_V_ON 0
+#endif
 static int civic_yespower2_fixed(civic_yespower_local_t *local0,
                                  civic_yespower_local_t *local1,
                                  const uint8_t *src0,
@@ -3748,6 +3850,38 @@ static int civic_yespower2_fixed(civic_yespower_local_t *local0,
     pwxform_ctx_t ctx[2];
     uint8_t sha256[2][32];
 
+#if CIVIC_YP2_FUSED_V_ON
+    /* One allocation holds both lanes' V arrays so the two random smix2
+     * walks share a single mapping / TLB range instead of two separate 2MB
+     * allocations.  Lane 0 at offset 0, lane 1 at the first 2MB-aligned
+     * offset >= V_size. */
+    const size_t V_stride = (V_size + HUGEPAGE_SIZE - 1) & ~(size_t)(HUGEPAGE_SIZE - 1);
+    const size_t fused_V_total = 2 * V_stride;
+    const size_t fused_need = fused_V_total + 2 * (B_size + XY_size + S_size);
+
+    if (local0->aligned_size < fused_need)
+    {
+        if (free_region(local0) || !alloc_region(local0, fused_need))
+            goto fail2;
+    }
+    V[0] = (salsa20_blk_t *)local0->aligned;
+    V[1] = (salsa20_blk_t *)((uint8_t *)V[0] + V_stride);
+    B[0] = (uint8_t *)V[0] + fused_V_total;
+    B[1] = B[0] + B_size + XY_size + S_size;
+    for (unsigned lane = 0; lane < 2; ++lane)
+    {
+        XY[lane] = (salsa20_blk_t *)(B[lane] + B_size);
+        S[lane] = (uint8_t *)XY[lane] + XY_size;
+        ctx[lane].S0 = S[lane];
+        ctx[lane].S1 = S[lane] + S_part;
+        ctx[lane].S2 = S[lane] + 2 * S_part;
+        ctx[lane].Sbytes = S_size;
+        ctx[lane].w = 0;
+        YP_SHA256_Buf(src[lane], 32, sha256[lane]);
+        YP_PBKDF2_SHA256(sha256[lane], 32, src[lane], 0, 1, B[lane], 128);
+        memcpy(sha256[lane], B[lane], 32);
+    }
+#else
     for (unsigned lane = 0; lane < 2; ++lane)
     {
         if (locals[lane]->aligned_size < need)
@@ -3768,6 +3902,7 @@ static int civic_yespower2_fixed(civic_yespower_local_t *local0,
         YP_PBKDF2_SHA256(sha256[lane], 32, src[lane], 0, 1, B[lane], 128);
         memcpy(sha256[lane], B[lane], 32);
     }
+#endif
 
     civic_smix_1_0_2way(B[0], B[1], civic_N, civic_r,
                          V[0], V[1], XY[0], XY[1], &ctx[0], &ctx[1]);
@@ -3806,7 +3941,17 @@ int civic_yespower2_tls(const uint8_t *src0,
 #ifdef __AVX2__
     if (srclen == 32 && params->version == YESPOWER_1_0 && params->N == 2048 &&
         params->r == 8 && !params->pers && params->perslen == 0)
+    {
+#if CIVIC_YP2_FUSED_V_ON
+        if (getenv("SOJ_NO_FUSED_V"))
+        {
+            int rc0 = civic_yespower(&local[0], src0, srclen, params, dst0);
+            int rc1 = civic_yespower(&local[1], src1, srclen, params, dst1);
+            return rc0 | rc1;
+        }
+#endif
         return civic_yespower2_fixed(&local[0], &local[1], src0, src1, dst0, dst1);
+    }
 #endif
 
     int rc0 = civic_yespower(&local[0], src0, srclen, params, dst0);

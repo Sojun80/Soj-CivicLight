@@ -56,6 +56,69 @@ static void sha256d_local(void *output, const void *input, size_t len)
     sha256_full(output, h, 32);
 }
 
+static void sha256_32_2way(void *out0, void *out1, const void *in0, const void *in1)
+{
+    uint32_t       st0[8] __attribute__((aligned(64)));
+    uint32_t       st1[8] __attribute__((aligned(64)));
+    uint8_t        blk0[64] __attribute__((aligned(64)));
+    uint8_t        blk1[64] __attribute__((aligned(64)));
+    sha256_context iv __attribute__((aligned(64)));
+    int            i;
+
+    sha256_ctx_init(&iv);
+    memcpy(st0, iv.state, 32);
+    memcpy(st1, iv.state, 32);
+    memcpy(blk0, in0, 32);
+    memcpy(blk1, in1, 32);
+    memset(blk0 + 32, 0, 32);
+    memset(blk1 + 32, 0, 32);
+    blk0[32] = 0x80;
+    blk1[32] = 0x80;
+    blk0[62] = 0x01;
+    blk1[62] = 0x01;
+    sha256_2x_transform_be(st0, st1, blk0, blk1, st0, st1);
+    for (i = 0; i < 8; i++)
+    {
+        ((uint32_t *)out0)[i] = __builtin_bswap32(st0[i]);
+        ((uint32_t *)out1)[i] = __builtin_bswap32(st1[i]);
+    }
+}
+
+static void sha256d_80_2way_midstate(void *out0,
+                                     void *out1,
+                                     const void *header0,
+                                     const void *header1,
+                                     const sha256_context *midstate)
+{
+    uint32_t st0[8] __attribute__((aligned(64)));
+    uint32_t st1[8] __attribute__((aligned(64)));
+    uint8_t  blk0[64] __attribute__((aligned(64)));
+    uint8_t  blk1[64] __attribute__((aligned(64)));
+    uint8_t  h0[32] __attribute__((aligned(64)));
+    uint8_t  h1[32] __attribute__((aligned(64)));
+    int      i;
+
+    memcpy(st0, midstate->state, 32);
+    memcpy(st1, midstate->state, 32);
+    memset(blk0, 0, 64);
+    memset(blk1, 0, 64);
+    memcpy(blk0, (const uint8_t *)header0 + 64, 16);
+    memcpy(blk1, (const uint8_t *)header1 + 64, 16);
+    blk0[16] = 0x80;
+    blk1[16] = 0x80;
+    blk0[62] = 0x02;
+    blk1[62] = 0x02;
+    blk0[63] = 0x80;
+    blk1[63] = 0x80;
+    sha256_2x_transform_be(st0, st1, blk0, blk1, st0, st1);
+    for (i = 0; i < 8; i++)
+    {
+        ((uint32_t *)h0)[i] = __builtin_bswap32(st0[i]);
+        ((uint32_t *)h1)[i] = __builtin_bswap32(st1[i]);
+    }
+    sha256_32_2way(out0, out1, h0, h1);
+}
+
 static void sha256d_80_midstate(void *output, const void *header80, const sha256_context *midstate)
 {
     uint8_t h[32];
@@ -109,8 +172,13 @@ static void civiclight_core_v2_2way(void *output0,
     civic_yespower_binary_t yp_out[2];
     const civic_yespower_params_t params = {YESPOWER_1_0, 2048, 8, NULL, 0};
 
-    sha256_full(hash1[0], input0, len);
-    sha256_full(hash1[1], input1, len);
+    if (len == 32)
+        sha256_32_2way(hash1[0], hash1[1], input0, input1);
+    else
+    {
+        sha256_full(hash1[0], input0, len);
+        sha256_full(hash1[1], input1, len);
+    }
     civic_yespower2_impl(hash1[0], hash1[1], 32, &params, &yp_out[0], &yp_out[1]);
 
     for (int i = 0; i < 32; i++)
@@ -118,8 +186,7 @@ static void civiclight_core_v2_2way(void *output0,
         xor_buf[0][i] = yp_out[0].uc[i] ^ hash1[0][i];
         xor_buf[1][i] = yp_out[1].uc[i] ^ hash1[1][i];
     }
-    sha256_full(output0, xor_buf[0], 32);
-    sha256_full(output1, xor_buf[1], 32);
+    sha256_32_2way(output0, output1, xor_buf[0], xor_buf[1]);
 }
 
 // Extract nTime from raw 80-byte block header (bytes 68-71, little-endian)
@@ -160,8 +227,7 @@ static void civiclight_powhash_2way_midstate(void *output0,
                                              const sha256_context *midstate)
 {
     uint8_t intermediate[2][32];
-    sha256d_80_midstate(intermediate[0], header0, midstate);
-    sha256d_80_midstate(intermediate[1], header1, midstate);
+    sha256d_80_2way_midstate(intermediate[0], intermediate[1], header0, header1, midstate);
 
     if (extract_ntime(header0) >= CIVICLIGHT_V2_ACTIVATION_TIME &&
         extract_ntime(header1) >= CIVICLIGHT_V2_ACTIVATION_TIME)
