@@ -1,12 +1,13 @@
 #!/bin/bash
-# bench-kit.sh - portable A/B bench for the CivicLight pwx kernel.
-# Builds packed vs unpacked smix2 micro-benches from the same source and
-# runs them back-to-back.  Use on a quiet box (bare-metal Linux preferred).
+# bench-kit.sh - A/B bench for the CivicLight 2-way smix kernels.
+# Builds the register-promoted kernel twice -- sequential step order vs ILV
+# load hoisting (-DCIVIC_PWX_ILV_REG) -- and runs them back-to-back.
+# Use on a quiet box (bare-metal Linux preferred).
 #
 # Usage:  ./bench-kit.sh [SOJ_MARCH]     (default: native)
 # If a compiler is missing on the target, pre-build locally and push:
-#   ./bench-kit.sh build znver5      -> emits /tmp/smix2-packed, /tmp/smix2-unpacked
-#   ./bench-kit.sh run               -> runs the two binaries and prints deltas
+#   ./bench-kit.sh build <march>   -> emits /tmp/smix2-seqreg, /tmp/smix2-ilvreg
+#   ./bench-kit.sh run             -> runs both binaries and prints deltas
 set -e
 
 MODE="${1:-}"
@@ -32,40 +33,40 @@ COMMON="-O3 -march=${MARCH} -mtune=${MARCH} -mavx2 -mfma -mbmi2 -mlzcnt -mpopcnt
 tests/civiclight-smix2-bench.c algo/civiclight/yespower/yespower-opt.c \
 algo/civiclight/yespower/yespower_sha256.c algo/civiclight/yespower/yespower-platform.c"
 
+build_one () {
+    OUT="$1"; shift
+    echo "== building ${OUT} (march=${MARCH}$*) =="
+    if ! $CC $COMMON "$@" -o "$OUT" >"${OUT}-build.log" 2>&1; then
+        cat "${OUT}-build.log" >&2
+        exit 1
+    fi
+    grep -v "Note:" "${OUT}-build.log" || true
+}
+
 case "$MODE" in
   build)
-    echo "== building packed smix2 bench (-DCIVIC_PWX_PACKED, march=${MARCH}) =="
-    if ! $CC $COMMON -DCIVIC_PWX_PACKED -o /tmp/smix2-packed >/tmp/smix2-packed-build.log 2>&1; then
-      cat /tmp/smix2-packed-build.log >&2
-      exit 1
-    fi
-    grep -v "Note:" /tmp/smix2-packed-build.log || true
-    echo "== building unpacked smix2 bench (default, no flag) =="
-    if ! $CC $COMMON -o /tmp/smix2-unpacked >/tmp/smix2-unpacked-build.log 2>&1; then
-      cat /tmp/smix2-unpacked-build.log >&2
-      exit 1
-    fi
-    grep -v "Note:" /tmp/smix2-unpacked-build.log || true
-    ls -la /tmp/smix2-packed /tmp/smix2-unpacked
+    build_one /tmp/smix2-seqreg
+    build_one /tmp/smix2-ilvreg -DCIVIC_PWX_ILV_REG
+    ls -la /tmp/smix2-seqreg /tmp/smix2-ilvreg
     ;;
   run)
-    [ -x /tmp/smix2-packed ] || { echo "missing /tmp/smix2-packed; run bench-kit.sh build <march> first" >&2; exit 1; }
-    [ -x /tmp/smix2-unpacked ] || { echo "missing /tmp/smix2-unpacked; run bench-kit.sh build <march> first" >&2; exit 1; }
-    /tmp/smix2-packed > /tmp/packed.out
-    /tmp/smix2-unpacked > /tmp/unpacked.out
-    echo "================ PACKED ================"
-    sed -n '2,8p' /tmp/packed.out
-    echo
-    echo "================ UNPACKED ================"
-    sed -n '2,8p' /tmp/unpacked.out
-    echo
-    echo "== per-mode delta (ns/hash 2-way; negative = unpacked faster) =="
-    awk 'FNR==NR { if (FNR>2 && $1!="mode") p[$1]=$7; next }
-         FNR>2 && $1!="mode" { u[$1]=$7 }
-         END { for (m in p) if (u[m]!="")
-                 printf "  %-16s packed=%10.1f unpacked=%10.1f  %+6.2f%%\n", m, p[m], u[m], (u[m]/p[m]-1)*100 }' \
-         /tmp/packed.out /tmp/unpacked.out | sort
+    [ -x /tmp/smix2-seqreg ] || { echo "missing /tmp/smix2-seqreg; run bench-kit.sh build <march> first" >&2; exit 1; }
+    [ -x /tmp/smix2-ilvreg ] || { echo "missing /tmp/smix2-ilvreg; run bench-kit.sh build <march> first" >&2; exit 1; }
+    ROUNDS="${ROUNDS:-3}"
+    for i in $(seq 1 "$ROUNDS"); do
+        /tmp/smix2-seqreg > "/tmp/seqreg-$i.out"
+        /tmp/smix2-ilvreg > "/tmp/ilvreg-$i.out"
+    done
+    echo "== medians over $ROUNDS rounds (ns/hash, 2-way) =="
+    for bin in seqreg ilvreg; do
+        for row in "random+save" "pipelined" "reg-state"; do
+            med=$(grep -hF "$row" /tmp/$bin-*.out | awk '{print $7}' | sort -n | awk '{a[NR]=$1} END {if (NR%2) print a[(NR+1)/2]; else print (a[NR/2]+a[NR/2+1])/2}')
+            printf "  %-14s %-12s %s\n" "$bin" "$row:" "$med"
+        done
+        echo
+    done
     ;;
   *)
-    echo "usage: bench-kit.sh build <march> | bench-kit.sh run" >&2; exit 1;;
+    echo "usage: bench-kit.sh build <march> | bench-kit.sh run" >&2
+    exit 1;;
 esac

@@ -130,6 +130,48 @@ feature branch. The active path is shown on the `[SYSTEM]` line.
 Normal startup also displays a terminal-safe ASCII Mudflap Girl banner. It is
 omitted by quiet and hardened-silent builds.
 
+### Build knobs (opt-in, environment-controlled)
+
+`build-clang-fast.sh` accepts optional knobs on top of `SOJ_MARCH` /
+`SOJ_MTUNE`. Knobs propagate through the recursive Zen 2 + Zen 4 wrapper and
+the PGO passes:
+
+| Knob | Effect |
+|---|---|
+| `SOJ_PGO=1` | Two-pass instrumented PGO. Stage 1 builds with `-fprofile-instr-generate`, trains on a short offline `--benchmark` run (`SOJ_PGO_THREADS`, default 4), merges via auto-detected `llvm-profdata`, then rebuilds with the profile. |
+| `SOJ_OMIT_FP=1` | `-fomit-frame-pointer`; frees RBP. Neutral-to-negative here; kept for A/B. |
+| `SOJ_ALIGN=16\|32\|64` | `-falign-functions/-falign-loops`. Neutral-to-negative here. |
+| `SOJ_LTO=1` | ThinLTO. |
+| `SOJ_NOPIE=1` | Non-PIE build (direct global addressing). |
+| `CLANG_INLINE_THRESHOLD=N` | LLVM inline threshold pass-through. |
+| `CLANG_UNROLL_THRESHOLD=N` | LLVM unroll threshold pass-through. |
+| `SOJ_EXTRA_CFLAGS="..."` | Arbitrary extra compiler flags. |
+
+Always-on additions: `-fvisibility=hidden` and `-Wl,-O2`.
+
+The recommended production invocation on Zen 4 (7950X3D rig data):
+
+```sh
+SOJ_MARCH=znver4 SOJ_PGO=1 ./build-clang-fast.sh
+```
+
+### smix kernel selection
+
+Two families of 2-way blockmix kernels live in `yespower-opt.c`:
+
+- **struct + software-pipelined** (`civic_blockmix_xor_2way_pipe`,
+  `civic_blockmix_xor_save_2way_pipe`) — the default.
+- **register-promoted** (`civic_blockmix_xor_save_2way_reg`,
+  `civic_blockmix_xor_2way_reg`) — selected with `-DCIVIC_PWX_REGSTATE`.
+  Within them, `-DCIVIC_PWX_ILV_REG` switches the pwx step to ILV load
+  hoisting instead of lane-sequential order.
+
+Production call sites go through the `CIVIC_SMIX1_BLKXOR` /
+`CIVIC_SMIX2_BLKXOR` macros. Rig data (7950X3D, Zen 4, CCD0, 8 threads,
+interleaved rounds): the register-promoted forms lose ~2.7% end-to-end on
+Zen 4 despite avoiding struct aliasing reloads — the V-block software
+pipeline wins there. Keep the knob for other uarchs and future A/B.
+
 ## Benchmark
 
 ```sh
@@ -149,6 +191,17 @@ calculations in one process and verifies their output after every chunk:
 
 It is also entirely offline. Adjust the run length with
 `CIVIC_SALSA_BENCH_CHUNKS` and `CIVIC_SALSA_BENCH_ITERATIONS`.
+
+### Kernel A/B micro-benchmarks
+
+`bench-kit.sh` builds the register-promoted smix2 kernel twice (sequential
+vs ILV step order), runs both against the legacy struct-pipe baseline rows,
+and reports medians over `ROUNDS` rounds:
+
+```sh
+CC=clang ./bench-kit.sh build znver4
+ROUNDS=5 ./bench-kit.sh run
+```
 
 ## Mine
 
