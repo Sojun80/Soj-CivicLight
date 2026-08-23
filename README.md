@@ -138,10 +138,10 @@ the PGO passes:
 
 | Knob | Effect |
 |---|---|
-| `SOJ_PGO=1` | Two-pass instrumented PGO. Stage 1 builds with `-fprofile-instr-generate`, trains on a short offline `--benchmark` run (`SOJ_PGO_THREADS`, default 4), merges via auto-detected `llvm-profdata`, then rebuilds with the profile. **EXPERIMENTAL / DO NOT SHIP**: the PGO binary passes all consensus vectors and long benchmark runs but segfaults within seconds under real stratum mining (clang 20 instr-PGO miscompile suspected in the mining-only paths the benchmark training never executes). Bench gain was only ~+0.5% anyway. |
+| `SOJ_PGO=1` | Two-pass instrumented PGO. Stage 1 builds with `-fprofile-instr-generate`, trains, merges via auto-detected `llvm-profdata`, then rebuilds with the profile. **clang-20 instr-PGO miscompiles the curl/stratum paths** (mangled pointers -> SIGSEGV under real mining), so profile-use is scoped to the compute TUs by default (`SOJ_PGO_KEEP_TUS`, allow-list of object-name substrings; set `SOJ_PGO_SKIP_TUS` instead for a deny-list). Train on real mining when possible: benchmark-only training is untested against this bug. Verified recipe: build the instrumented binary (`SOJ_PGO=1 SOJ_PGO_PASS=train`), run it under real stratum mining with `LLVM_PROFILE_FILE=/tmp/pgo-%p.profraw` (~35s, stop with SIGINT so atexit dumps), merge to `/tmp/soj-pgo.profdata`, then `SOJ_MARCH=znver4 SOJ_PGO=1 SOJ_PGO_PASS=use ./build-clang-fast.sh`. Rig-validated: no crashes over long stratum soaks, +0.5-0.7% vs non-PGO. |
 | `SOJ_OMIT_FP=1` | `-fomit-frame-pointer`; frees RBP. Neutral-to-negative here; kept for A/B. |
 | `SOJ_ALIGN=16\|32\|64` | `-falign-functions/-falign-loops`. Neutral-to-negative here. |
-| `SOJ_LTO=1` | ThinLTO. |
+| `SOJ_LTO=1` | ThinLTO. Untested under PGO — do not combine until validated. |
 | `SOJ_NOPIE=1` | Non-PIE build (direct global addressing). |
 | `CLANG_INLINE_THRESHOLD=N` | LLVM inline threshold pass-through. |
 | `CLANG_UNROLL_THRESHOLD=N` | LLVM unroll threshold pass-through. |
@@ -149,10 +149,11 @@ the PGO passes:
 
 Always-on additions: `-fvisibility=hidden` and `-Wl,-O2`.
 
-The production invocation for Zen 4 is the plain default:
+The production invocation for Zen 4 (PGO optional; see training recipe above):
 
 ```sh
 SOJ_MARCH=znver4 ./build-clang-fast.sh
+SOJ_MARCH=znver4 SOJ_PGO=1 SOJ_PGO_PASS=use ./build-clang-fast.sh   # needs /tmp/soj-pgo.profdata
 ```
 
 ### smix kernel selection

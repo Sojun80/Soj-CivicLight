@@ -205,6 +205,43 @@ fi
 
 do_build
 
+# --------- PGO SCOPE LIMITER ---------
+# SOJ_PGO_SKIP_TUS: space-separated substrings of object names rebuilt
+# WITHOUT the profile.  clang-20 instr-PGO miscompiles at least the curl /
+# stratum paths (mangled pointers -> SIGSEGV under real mining), so default
+# scope keeps the profile on the compute TUs only.
+if [ "${SOJ_PGO:-0}" = "1" ] && [ "$PGO_PASS" = "use" ]; then
+    SKIP_TUS="${SOJ_PGO_SKIP_TUS:-}"
+    # Allow-list wins when set: every soj-*.o NOT matching is rebuilt plain.
+    KEEP_TUS="${SOJ_PGO_KEEP_TUS:-civiclight yespower sph_sha2 sha1-hash sha256-hash sha256d md_helper simd-constants}"
+    SKIP_OBJS=""
+    for o in $(find . -name 'soj-*.o' -not -path './autom4te.cache/*'); do
+        [ -e "$o" ] || continue
+        b=$(basename "$o" .o)
+        b=${b#soj-}
+        keep=""
+        for k in $KEEP_TUS; do
+            case "$b" in
+                *$k*) keep=1; break;;
+            esac
+        done
+        if [ -z "$keep" ]; then
+            if [ -n "$SKIP_TUS" ]; then
+                for t in $SKIP_TUS; do
+                    if [ "$b" = "$t" ]; then SKIP_OBJS="$SKIP_OBJS $o"; break; fi
+                done
+            else
+                SKIP_OBJS="$SKIP_OBJS $o"
+            fi
+        fi
+    done
+    if [ -n "$SKIP_OBJS" ]; then
+        echo "PGO scope: rebuilding without profile:$SKIP_OBJS"
+        rm -f $SKIP_OBJS
+        make CFLAGS="${BASE_CFLAGS} ${ALIGN_FLAGS} ${NOPIE_CFLAGS} ${INLINE_FLAGS}" -s >/dev/null
+    fi
+fi
+
 # --------- PGO TRAINING RUN (train pass only; never published) ---------
 if [ "$PGO_PASS" = "train" ]; then
     rm -f /tmp/soj-pgo-*.profraw /tmp/soj-pgo.profdata
