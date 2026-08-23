@@ -138,7 +138,7 @@ the PGO passes:
 
 | Knob | Effect |
 |---|---|
-| `SOJ_PGO=1` | Two-pass instrumented PGO. Stage 1 builds with `-fprofile-instr-generate`, trains on a short offline `--benchmark` run (`SOJ_PGO_THREADS`, default 4), merges via auto-detected `llvm-profdata`, then rebuilds with the profile. |
+| `SOJ_PGO=1` | Two-pass instrumented PGO. Stage 1 builds with `-fprofile-instr-generate`, trains on a short offline `--benchmark` run (`SOJ_PGO_THREADS`, default 4), merges via auto-detected `llvm-profdata`, then rebuilds with the profile. **EXPERIMENTAL / DO NOT SHIP**: the PGO binary passes all consensus vectors and long benchmark runs but segfaults within seconds under real stratum mining (clang 20 instr-PGO miscompile suspected in the mining-only paths the benchmark training never executes). Bench gain was only ~+0.5% anyway. |
 | `SOJ_OMIT_FP=1` | `-fomit-frame-pointer`; frees RBP. Neutral-to-negative here; kept for A/B. |
 | `SOJ_ALIGN=16\|32\|64` | `-falign-functions/-falign-loops`. Neutral-to-negative here. |
 | `SOJ_LTO=1` | ThinLTO. |
@@ -149,10 +149,10 @@ the PGO passes:
 
 Always-on additions: `-fvisibility=hidden` and `-Wl,-O2`.
 
-The recommended production invocation on Zen 4 (7950X3D rig data):
+The production invocation for Zen 4 is the plain default:
 
 ```sh
-SOJ_MARCH=znver4 SOJ_PGO=1 ./build-clang-fast.sh
+SOJ_MARCH=znver4 ./build-clang-fast.sh
 ```
 
 ### smix kernel selection
