@@ -292,6 +292,24 @@ int scanhash_civiclight(struct work *work, uint32_t max_nonce, uint64_t *hashes_
     memcpy(edata_pair[1], edata, sizeof(edata));
     sha256_ctx_init(&header_midstate);
     sha256_update(&header_midstate, edata, 64);
+#ifdef CIVIC_ONEWAY
+    while (n < last_nonce && !work_restart[thr_id].restart)
+    {
+        edata[19] = n;
+        civiclight_powhash_from_midstate(hash, edata, &header_midstate);
+        if (!bench && (stats_batch += 1) >= 256)
+        {
+            civiclight_stats_add_hashes(stats_batch);
+            stats_batch = 0;
+        }
+        if (unlikely(valid_hash(hash, ptarget) && !bench))
+        {
+            pdata[19] = bswap_32(n);
+            submit_solution(work, hash, mythr);
+        }
+        n++;
+    }
+#else
     while (n + 1 < last_nonce && !work_restart[thr_id].restart)
     {
         edata_pair[0][19] = n;
@@ -318,6 +336,7 @@ int scanhash_civiclight(struct work *work, uint32_t max_nonce, uint64_t *hashes_
         }
         n += 2;
     }
+#endif
     if (n < last_nonce && !work_restart[thr_id].restart)
     {
         edata[19] = n;
