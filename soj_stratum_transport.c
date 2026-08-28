@@ -54,32 +54,41 @@ static bool send_line(struct stratum_ctx *volatile sctx, char *s)
     while (len > 0)
     {
         struct timeval timeout = {0, 0};
-        int            n;
+        size_t         n = 0;
         fd_set         wd;
 
         FD_ZERO(&wd);
-        if (sctx->sock < 0)
+        if (sctx->sock == CURL_SOCKET_BAD)
             return false;
         FD_SET(sctx->sock, &wd);
-        if (select((int)(sctx->sock + 1), NULL, &wd, NULL, &timeout) < 1)
+        int ready = select((int)(sctx->sock + 1), NULL, &wd, NULL, &timeout);
+        if (ready < 1)
             return false;
 
 #if LIBCURL_VERSION_NUM >= 0x071802
-        CURLcode rc = curl_easy_send(sctx->curl, s + sent, len, (size_t *)&n);
+        CURLcode rc = curl_easy_send(sctx->curl, s + sent, (size_t)len, &n);
         if (rc != CURLE_OK)
         {
             if (rc != CURLE_AGAIN)
-#else
-        n = send(sctx->sock, s + sent, len, 0);
-        if (n < 0)
-        {
-            if (!socket_blocks())
+            {
+#ifndef RELEASE_HARDENED
+                applog(LOG_ERR, "Stratum send failed: %s", curl_easy_strerror(rc));
 #endif
                 return false;
-            n = 0;
+            }
         }
+#else
+        int socket_n = send(sctx->sock, s + sent, len, 0);
+        if (socket_n < 0)
+        {
+            if (!socket_blocks())
+                return false;
+        }
+        else
+            n = (size_t)socket_n;
+#endif
         sent += n;
-        len -= n;
+        len -= (int)n;
     }
 
     return true;
@@ -156,10 +165,14 @@ static bool socket_full(curl_socket_t sock, int timeout)
     fd_set         rd;
 
     // Validate socket before using it in select()
-    if (sock < 0 || sock >= FD_SETSIZE)
+    if (sock == CURL_SOCKET_BAD)
     {
         return false;
     }
+#ifndef WIN32
+    if (sock >= FD_SETSIZE)
+        return false;
+#endif
 
     FD_ZERO(&rd);
     FD_SET(sock, &rd);
@@ -213,13 +226,13 @@ __attribute__((noinline)) char *stratum_recv_line(struct stratum_ctx *sctx)
         do
         {
             char    s[RBUFSIZE];
-            ssize_t n;
+            size_t  n = 0;
 
             memset(s, 0, RBUFSIZE);
 
 #if LIBCURL_VERSION_NUM >= 0x071802
 
-            CURLcode rc = curl_easy_recv(sctx->curl, s, RECVSIZE, (size_t *)&n);
+            CURLcode rc = curl_easy_recv(sctx->curl, s, RECVSIZE, &n);
             if (rc == CURLE_OK && !n)
             {
                 ret = false;
@@ -229,25 +242,33 @@ __attribute__((noinline)) char *stratum_recv_line(struct stratum_ctx *sctx)
             {
                 if (rc != CURLE_AGAIN || !socket_full(sctx->sock, 1))
                 {
+                    ret = false;
+                    break;
+                }
+            }
+            else if (rc == CURLE_OK)
+                stratum_buffer_append(sctx, s);
 #else
-
-            n = recv(sctx->sock, s, RECVSIZE, 0);
-            if (!n)
+            int socket_n = recv(sctx->sock, s, RECVSIZE, 0);
+            if (socket_n == 0)
             {
                 ret = false;
                 break;
             }
-            if (n < 0)
+            if (socket_n < 0)
             {
                 if (!socket_blocks() || !socket_full(sctx->sock, 1))
                 {
-#endif
                     ret = false;
                     break;
                 }
             }
             else
+            {
+                n = (size_t)socket_n;
                 stratum_buffer_append(sctx, s);
+            }
+#endif
         } while (time(NULL) - rstart < 60 && !strstr(sctx->sockbuf, "\n"));
 
         if (!ret)
@@ -481,9 +502,23 @@ __attribute__((noinline)) bool stratum_connect(struct stratum_ctx *sctx, const c
         return false;
     }
 
-    curl_socket_t last_sock = -1;
-    curl_easy_getinfo(curl, CURLINFO_LASTSOCKET, &last_sock);
-    sctx->sock = last_sock;
+#if LIBCURL_VERSION_NUM >= 0x072D00
+    rc = curl_easy_getinfo(curl, CURLINFO_ACTIVESOCKET, &sctx->sock);
+#else
+    /* CURLINFO_LASTSOCKET is a long and is broken on Win64. */
+    long last_sock = -1;
+    rc             = curl_easy_getinfo(curl, CURLINFO_LASTSOCKET, &last_sock);
+    sctx->sock     = (curl_socket_t)last_sock;
+#endif
+    if (rc != CURLE_OK || sctx->sock == CURL_SOCKET_BAD)
+    {
+#ifndef RELEASE_HARDENED
+        applog(LOG_ERR, "Stratum active socket unavailable: %s", curl_easy_strerror(rc));
+#endif
+        curl_easy_cleanup(curl);
+        sctx->curl = NULL;
+        return false;
+    }
 
     sctx->immediate_disconnect = false;
 
@@ -523,8 +558,6 @@ __attribute__((noinline)) bool stratum_connect(struct stratum_ctx *sctx, const c
     pthread_mutex_lock(&sctx->sock_lock);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, sctx);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, stratum_discard_cb);
-    /* CURLINFO_LASTSOCKET is broken on Win64; only use it as a last resort */
-    curl_easy_getinfo(curl, CURLINFO_LASTSOCKET, (long *)&sctx->sock);
     pthread_mutex_unlock(&sctx->sock_lock);
     return true;
 }
@@ -676,7 +709,7 @@ __attribute__((noinline)) bool stratum_subscribe(struct stratum_ctx *sctx)
     }
 
     // CRITICAL: Validate socket before any socket operations
-    if (sctx->sock < 0)
+    if (sctx->sock == CURL_SOCKET_BAD)
     {
 #ifndef RELEASE_HARDENED
         applog(LOG_ERR, "stratum_subscribe: Invalid socket: %d", sctx->sock);
